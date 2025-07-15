@@ -123,15 +123,20 @@ EOF
 
         stage('Deploy to K3s via Helm') {
             steps {
-                sh 'mkdir -p ~/.kube && echo "${KUBE_CONFIG}" > ~/.kube/config && chmod 600 ~/.kube/config'
-
-                sh """
-                    helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                      --namespace default \
-                      --set image.repository=${DOCKER_IMAGE} \
-                      --set image.tag=${BUILD_NUMBER} \
-                      --wait --timeout 5m
-                """
+               withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
+                   sh '''
+                       mkdir -p ~/.kube
+                       cp $KUBECONFIG_FILE ~/.kube/config
+                       chmod 600 ~/.kube/config
+                   '''
+                   sh """
+                       helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                       --namespace default \
+                       --set image.repository=${DOCKER_IMAGE} \
+                       --set image.tag=${BUILD_NUMBER} \
+                       --wait --timeout 5m
+                   """
+                }
             }
         }
 
