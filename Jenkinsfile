@@ -41,9 +41,9 @@ pipeline {
                         def sonarParams = """
                         -Dsonar.projectKey=rs-school-stars-shine \
                         -Dsonar.sources=src \
+                        -Dsonar.tests=src \
                         -Dsonar.host.url=https://sonarqube.codershub.top \
-                        -Dsonar.login=${SONAR_TOKEN} \
-                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                        -Dsonar.login=${SONAR_TOKEN}
                         """
                         if (env.CHANGE_ID) {
                             sonarParams += """
@@ -54,7 +54,7 @@ pipeline {
                         } else {
                             sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
                         }
-                        sh "npx sonar-scanner@latest ${sonarParams}"
+                        sh "npx sonar-scanner ${sonarParams}"
                     }
                 }
             }
