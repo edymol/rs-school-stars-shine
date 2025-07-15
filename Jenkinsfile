@@ -7,7 +7,8 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
-        HELM_CHART = './rs-school-app'
+        CHART_NAME = 'rs-school-chart'
+        RELEASE_NAME = 'rs-school-app'
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
@@ -23,17 +24,20 @@ pipeline {
                 checkout scm
             }
         }
-        stage('Build') {
+
+        stage('Install & Build') {
             steps {
                 sh 'npm install'
                 sh 'npm run build'
             }
         }
+
         stage('Unit Tests') {
             steps {
                 sh 'npx vitest run --coverage || echo "No tests configured"'
             }
         }
+
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
@@ -42,27 +46,19 @@ pipeline {
                             "-Dsonar.projectKey=rs-school-stars-shine",
                             "-Dsonar.sources=src",
                             "-Dsonar.tests=src",
-                            // "-Dsonar.host.url=..."  <-- unnecessary, handled by withSonarQubeEnv
-                            // "-Dsonar.login=..."    <-- unnecessary, handled by withSonarQubeEnv
                             "-Dsonar.exclusions=**/coverage/**,**/dist/**",
                             "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
                         ]
 
-                        if (env.CHANGE_ID && env.CHANGE_ID.trim()) {
-                            // PR analysis parameters (only if defined)
+                        if (env.CHANGE_ID) {
                             sonarParams += [
                                 "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
                                 "-Dsonar.pullrequest.branch=${env.CHANGE_BRANCH}",
                                 "-Dsonar.pullrequest.base=${env.CHANGE_TARGET}"
                             ]
                         }
-                        // DO NOT add branch name parameter unless your SonarQube edition supports it
-                        // else if (env.BRANCH_NAME && env.BRANCH_NAME.trim()) {
-                        //    sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
-                        // }
 
                         env.SONAR_SCANNER_OPTS = "-Xmx2g"
-
                         sh "npx sonar-scanner ${sonarParams.join(' ')}"
                     }
                 }
@@ -76,8 +72,7 @@ pipeline {
             }
         }
 
-
-        stage('Build and Push Docker Image') {
+        stage('Docker Build & Push') {
             steps {
                 script {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
@@ -88,44 +83,89 @@ pipeline {
                 }
             }
         }
-        stage('Deploy to Kubernetes') {
+
+        stage('Create Helm Chart Dynamically') {
             steps {
-                sh 'mkdir -p ~/.kube && echo "${KUBE_CONFIG}" > ~/.kube/config'
+                sh '''
+                    rm -rf ${CHART_NAME}
+                    helm create ${CHART_NAME}
+
+                    cat <<EOF > ${CHART_NAME}/values.yaml
+replicaCount: 2
+
+image:
+  repository: ${DOCKER_IMAGE}
+  pullPolicy: IfNotPresent
+  tag: "${BUILD_NUMBER}"
+
+serviceAccount:
+  create: false
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 9999
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: false
+EOF
+
+                    # Patch deployment & service template
+                    sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
+                    sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
+                    rm ${CHART_NAME}/templates/*.bak
+                '''
+            }
+        }
+
+        stage('Deploy to K3s via Helm') {
+            steps {
+                sh 'mkdir -p ~/.kube && echo "${KUBE_CONFIG}" > ~/.kube/config && chmod 600 ~/.kube/config'
+
                 sh """
-                helm upgrade --install rs-school-app ${HELM_CHART} \
-                  --set image.repository=${DOCKER_IMAGE} \
-                  --set image.tag=${BUILD_NUMBER} \
-                  --namespace default
+                    helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                      --namespace default \
+                      --set image.repository=${DOCKER_IMAGE} \
+                      --set image.tag=${BUILD_NUMBER} \
+                      --wait --timeout 5m
                 """
             }
         }
+
         stage('Application Verification') {
             steps {
-                sh 'sleep 30'
-                sh 'kubectl get pods -n default | grep rs-school-app || exit 1'
-                sh 'curl -f -k https://rsschool.codershub.top || exit 1'
+                sh 'sleep 20'
+                sh 'kubectl get pods -n default | grep ${RELEASE_NAME} || exit 1'
+                sh 'curl -f http://192.168.0.101:9999 || exit 1'
             }
         }
     }
+
     post {
         success {
             emailext (
-                subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "The pipeline succeeded. Application deployed to https://rsschool.codershub.top",
-                to: 'your.email@example.com'
+                subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "✅ Deployment complete. App is available at: http://192.168.0.101:9999",
+                to: 'edy@codershub.top'
             )
         }
+
         failure {
             emailext (
-                subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "The pipeline failed. Check console output at ${env.BUILD_URL}",
-                to: 'your.email@example.com'
+                subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
+                to: 'edy@codershub.top'
             )
         }
+
         always {
             sh 'docker logout || true'
             sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
             sh "docker rmi ${DOCKER_IMAGE}:latest || true"
+            sh 'rm -f ~/.kube/config'
         }
     }
 }
