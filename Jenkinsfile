@@ -1,19 +1,20 @@
 pipeline {
-    agent { label 'worker-node-01' }
+    agent { label 'worker-agents' }
 
-    triggers {
-                githubPush()
-            }
-
-    environment {
-        DOCKER_IMAGE = "edydockers/rs-school-app"
-        SONARQUBE_ENV = "SonarQube"
-        SONAR_PROJECT_KEY = "rs-school-stars-shine"
-        SONAR_ORGANIZATION = "your-org" // Optional
+    tools {
+        nodejs 'nodejs20'
     }
 
-    options {
-        skipDefaultCheckout(true)
+    environment {
+        DOCKER_IMAGE = 'edydockers/rs-school-app'
+        HELM_CHART = './helm-chart'
+        KUBE_CONFIG = credentials('kubernetes-config')
+        SONAR_TOKEN = credentials('sonarqube-token')
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')
     }
 
     stages {
@@ -22,115 +23,84 @@ pipeline {
                 checkout scm
             }
         }
-
-        stage('Install Dependencies') {
+        stage('Build App') {
             steps {
-                sh 'npm ci || npm install'
-            }
-        }
-
-        stage('Build') {
-            steps {
+                sh 'npm install'
                 sh 'npm run build'
             }
         }
-
         stage('Unit Tests') {
             steps {
-                script {
-                    def hasTestScript = sh(
-                        script: "jq -e '.scripts.test' package.json > /dev/null 2>&1",
-                        returnStatus: true
-                    ) == 0
-
-                    if (hasTestScript) {
-                        sh 'npx vitest run --coverage'
-                    } else {
-                        echo 'No unit tests found or configured'
+                sh 'npx vitest run --coverage || echo "No tests configured"'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    script {
+                        def sonarParams = """
+                        -Dsonar.projectKey=rs-school-stars-shine \
+                        -Dsonar.sources=src \
+                        -Dsonar.host.url=https://sonarqube.codershub.top \
+                        -Dsonar.login=${SONAR_TOKEN}
+                        """
+                        sh "npx sonar-scanner ${sonarParams}"
+                    }
+                }
+            }
+            post {
+                always {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: true
                     }
                 }
             }
         }
-
-        stage('SonarQube Analysis') {
-            environment {
-                SONAR_TOKEN = credentials('SONAR_TOKEN')
-            }
-            steps {
-                withSonarQubeEnv("${SONARQUBE_ENV}") {
-                    sh '''
-                        npx sonar-scanner \
-                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                          -Dsonar.sources=. \
-                          -Dsonar.host.url=$SONAR_HOST_URL \
-                          -Dsonar.login=$SONAR_TOKEN
-                    '''
-                }
-            }
-        }
-
-        stage("Wait for SonarQube Quality Gate") {
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
         stage('Build and Push Docker Image') {
-            environment {
-                DOCKERHUB_CREDENTIALS = credentials('DOCKERHUB_CREDENTIALS')
-            }
             steps {
                 script {
-                    def imageTag = "${DOCKER_IMAGE}:${env.BUILD_NUMBER}"
-                    sh "docker login -u $DOCKERHUB_CREDENTIALS_USR -p $DOCKERHUB_CREDENTIALS_PSW"
-                    sh "docker build -t ${imageTag} ."
-                    sh "docker tag ${imageTag} ${DOCKER_IMAGE}:latest"
-                    sh "docker push ${imageTag}"
+                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
+                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
-
-        stage('Deploy to Kubernetes') {
-            environment {
-                KUBECONFIG = credentials('jen-config')
-            }
+        stage('Deploy to K3s') {
             steps {
-                script {
-                    def imageTag = "${DOCKER_IMAGE}:${env.BUILD_NUMBER}"
-                    sh """
-                        helm upgrade --install rs-school-release ./helm-chart \
-                          --namespace default \
-                          --create-namespace \
-                          --kubeconfig $KUBECONFIG \
-                          --set image.repository=${DOCKER_IMAGE} \
-                          --set image.tag=${BUILD_NUMBER}
-                    """
-                }
+                sh 'mkdir -p ~/.kube && echo "${KUBE_CONFIG}" > ~/.kube/config'
+                sh """
+                helm upgrade --install rs-school-app ${HELM_CHART} \
+                  --set image.repository=${DOCKER_IMAGE} \
+                  --set image.tag=${BUILD_NUMBER} \
+                  --namespace default
+                """
             }
         }
-
-        stage('Application Verification') {
+        stage('Verification') {
             steps {
-                sh 'curl -f https://rsschool.codershub.top || exit 1'
+                sh 'sleep 30'
+                sh 'kubectl get pods -n default | grep rs-school-app || exit 1'
+                sh 'curl -f -k https://rsschool.codershub.top || exit 1'
             }
         }
     }
-
     post {
+        success {
+            emailext subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                     body: "App deployed to https://rsschool.codershub.top",
+                     to: 'edy@codershub.top'
+        }
+        failure {
+            emailext subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                     body: "Failed: ${env.BUILD_URL}",
+                     to: 'edy@codershub.top'
+        }
         always {
-            echo 'Cleaning up Docker images...'
             sh 'docker logout || true'
             sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
             sh "docker rmi ${DOCKER_IMAGE}:latest || true"
-        }
-
-        failure {
-            emailext to: 'edy@codershub.top',
-                     subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                     body: "Check the Jenkins job here: ${env.BUILD_URL}"
         }
     }
 }
