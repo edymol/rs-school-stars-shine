@@ -42,25 +42,27 @@ pipeline {
                             "-Dsonar.projectKey=rs-school-stars-shine",
                             "-Dsonar.sources=src",
                             "-Dsonar.tests=src",
-                            "-Dsonar.host.url=https://sonarqube.codershub.top",
-                            "-Dsonar.login=${SONAR_TOKEN}",
+                            // "-Dsonar.host.url=..."  <-- unnecessary, handled by withSonarQubeEnv
+                            // "-Dsonar.login=..."    <-- unnecessary, handled by withSonarQubeEnv
                             "-Dsonar.exclusions=**/coverage/**,**/dist/**",
                             "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
                         ]
 
-                        if (env.CHANGE_ID) {
+                        if (env.CHANGE_ID && env.CHANGE_ID.trim()) {
+                            // PR analysis parameters (only if defined)
                             sonarParams += [
                                 "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
                                 "-Dsonar.pullrequest.branch=${env.CHANGE_BRANCH}",
                                 "-Dsonar.pullrequest.base=${env.CHANGE_TARGET}"
                             ]
-                        } else {
-                            sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
                         }
+                        // DO NOT add branch name parameter unless your SonarQube edition supports it
+                        // else if (env.BRANCH_NAME && env.BRANCH_NAME.trim()) {
+                        //    sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
+                        // }
 
                         env.SONAR_SCANNER_OPTS = "-Xmx2g"
 
-                        // Join the params properly and run with npx
                         sh "npx sonar-scanner ${sonarParams.join(' ')}"
                     }
                 }
@@ -73,6 +75,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('Build and Push Docker Image') {
             steps {
