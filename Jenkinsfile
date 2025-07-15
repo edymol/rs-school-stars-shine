@@ -1,5 +1,9 @@
 pipeline {
+<<<<<<< HEAD
    agent { label 'worker-agents' }
+=======
+    agent { label 'worker-agents' }
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
 
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
@@ -9,11 +13,16 @@ pipeline {
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
     }
 
+<<<<<<< HEAD
 //     triggers {
 //         pollSCM('H/5 * * * *')
 //     }
     triggers {
         githubPush()
+=======
+    triggers {
+        pollSCM('H/5 * * * *')
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
     }
 
     stages {
@@ -33,6 +42,7 @@ pipeline {
                 sh 'npm test || echo "No unit tests found or configured"'
             }
         }
+<<<<<<< HEAD
         stage('SonarQube Security Check') {
             steps {
                 withSonarQubeEnv('SonarQube') {
@@ -43,12 +53,39 @@ pipeline {
                       -Dsonar.host.url=https://sonarqube.codershub.top \
                       -Dsonar.login=${SONAR_TOKEN}
                     """
+=======
+        stage('SonarQube Analysis') {  // Renamed for clarity; this "tests" the code quality
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    script {
+                        def sonarParams = """
+                        -Dsonar.projectKey=rs-school-stars-shine \
+                        -Dsonar.sources=src \
+                        -Dsonar.host.url=https://sonarqube.codershub.top \
+                        -Dsonar.login=${SONAR_TOKEN}
+                        """
+                        if (env.CHANGE_ID) {  // For PRs
+                            sonarParams += """
+                            -Dsonar.pullrequest.key=${env.CHANGE_ID} \
+                            -Dsonar.pullrequest.branch=${env.CHANGE_BRANCH} \
+                            -Dsonar.pullrequest.base=${env.CHANGE_TARGET}
+                            """
+                        } else {  // For branches
+                            sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
+                        }
+                        sh "sonar-scanner ${sonarParams}"
+                    }
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
                 }
             }
             post {
                 always {
                     timeout(time: 5, unit: 'MINUTES') {
+<<<<<<< HEAD
                         waitForQualityGate abortPipeline: true
+=======
+                        waitForQualityGate abortPipeline: true  // Fails build if quality gate fails
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
                     }
                 }
             }
@@ -77,9 +114,15 @@ pipeline {
         }
         stage('Application Verification') {
             steps {
+<<<<<<< HEAD
                 sh 'sleep 30'  // Wait for deployment rollout
                 sh 'kubectl get pods -n default | grep rs-school-app || exit 1'
                 sh 'curl -f -k https://rsschool.codershub.top || exit 1'  // Smoke test; -k if self-signed cert
+=======
+                sh 'sleep 30'
+                sh 'kubectl get pods -n default | grep rs-school-app || exit 1'
+                sh 'curl -f -k https://rsschool.codershub.top || exit 1'
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
             }
         }
     }
@@ -87,15 +130,25 @@ pipeline {
         success {
             emailext (
                 subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+<<<<<<< HEAD
                 body: "The pipeline succeeded. Application deployed to https://rsschool.codershub.top",
                 to: 'your.email@example.com'  // Configure recipient
+=======
+                body: "Pipeline succeeded. App at https://rsschool.codershub.top. Sonar results: https://sonarqube.codershub.top/dashboard?id=rs-school-stars-shine",
+                to: 'your.email@example.com'
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
             )
         }
         failure {
             emailext (
                 subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+<<<<<<< HEAD
                 body: "The pipeline failed. Check console output at ${env.BUILD_URL}",
                 to: 'your.email@example.com'  // Configure recipient
+=======
+                body: "Pipeline failed: ${env.BUILD_URL}",
+                to: 'your.email@example.com'
+>>>>>>> a777b02ab735d337b61bd7ce863b7538b7248a02
             )
         }
         always {
