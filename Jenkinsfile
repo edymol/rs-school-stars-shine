@@ -44,7 +44,7 @@ pipeline {
                     ) == 0
 
                     if (hasTestScript) {
-                        sh 'npm test'
+                        sh 'npx vitest run --coverage'
                     } else {
                         echo 'No unit tests found or configured'
                     }
@@ -95,13 +95,20 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             environment {
-                KUBECONFIG = credentials('KUBE_CONFIG')
+                KUBECONFIG = credentials('jen-config')
             }
             steps {
-                sh '''
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
-                '''
+                script {
+                    def imageTag = "${DOCKER_IMAGE}:${env.BUILD_NUMBER}"
+                    sh """
+                        helm upgrade --install rs-school-release ./helm-chart \
+                          --namespace default \
+                          --create-namespace \
+                          --kubeconfig $KUBECONFIG \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER}
+                    """
+                }
             }
         }
 
