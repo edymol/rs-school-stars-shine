@@ -38,26 +38,30 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     script {
-                        def sonarParams = """
-                        -Dsonar.projectKey=rs-school-stars-shine \
-                        -Dsonar.sources=src \
-                        -Dsonar.tests=src \
-                        -Dsonar.host.url=https://sonarqube.codershub.top \
-                        -Dsonar.login=${SONAR_TOKEN} \
-                        -Dsonar.exclusions=**/coverage/**,**/dist/** \
-                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-                        """
+                        def sonarParams = [
+                            "-Dsonar.projectKey=rs-school-stars-shine",
+                            "-Dsonar.sources=src",
+                            "-Dsonar.tests=src",
+                            "-Dsonar.host.url=https://sonarqube.codershub.top",
+                            "-Dsonar.login=${SONAR_TOKEN}",
+                            "-Dsonar.exclusions=**/coverage/**,**/dist/**",
+                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+                        ]
+
                         if (env.CHANGE_ID) {
-                            sonarParams += """
-                            -Dsonar.pullrequest.key=${env.CHANGE_ID} \
-                            -Dsonar.pullrequest.branch=${env.CHANGE_BRANCH} \
-                            -Dsonar.pullrequest.base=${env.CHANGE_TARGET}
-                            """
+                            sonarParams += [
+                                "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
+                                "-Dsonar.pullrequest.branch=${env.CHANGE_BRANCH}",
+                                "-Dsonar.pullrequest.base=${env.CHANGE_TARGET}"
+                            ]
                         } else {
                             sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
                         }
-                        env.SONAR_SCANNER_OPTS = "-Xmx2g"  // Increase heap; adjust to 4g if more RAM
-                        sh "npx sonar-scanner@latest ${sonarParams}"
+
+                        env.SONAR_SCANNER_OPTS = "-Xmx2g"
+
+                        // Join the params properly and run with npx
+                        sh "npx sonar-scanner ${sonarParams.join(' ')}"
                     }
                 }
             }
@@ -69,6 +73,7 @@ pipeline {
                 }
             }
         }
+
         stage('Build and Push Docker Image') {
             steps {
                 script {
