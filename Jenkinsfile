@@ -1,10 +1,6 @@
 pipeline {
     agent { label 'worker-agents' }
 
-    tools {
-        nodejs 'Node20'
-    }
-
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         HELM_CHART = './rs-school-app'
