@@ -8,10 +8,6 @@ pipeline {
         SONAR_ORGANIZATION = "your-org" // Optional
     }
 
-    tools {
-        nodejs "NodeJS 22"
-    }
-
     options {
         skipDefaultCheckout(true)
     }
