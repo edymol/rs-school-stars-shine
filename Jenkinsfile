@@ -1,6 +1,10 @@
 pipeline {
     agent { label 'worker-node-01' }
 
+    triggers {
+                githubPush()
+            }
+
     environment {
         DOCKER_IMAGE = "edydockers/rs-school-app"
         SONARQUBE_ENV = "SonarQube"
