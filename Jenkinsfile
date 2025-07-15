@@ -9,7 +9,7 @@ pipeline {
     }
 
     tools {
-        nodejs "NodeJS 22" // Make sure this tool is configured in Jenkins globally
+        nodejs "NodeJS 22"
     }
 
     options {
@@ -58,13 +58,13 @@ pipeline {
             }
             steps {
                 withSonarQubeEnv("${SONARQUBE_ENV}") {
-                    sh """
+                    sh '''
                         npx sonar-scanner \
                           -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                           -Dsonar.sources=. \
                           -Dsonar.host.url=$SONAR_HOST_URL \
                           -Dsonar.login=$SONAR_TOKEN
-                    """
+                    '''
                 }
             }
         }
