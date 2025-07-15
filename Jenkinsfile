@@ -7,14 +7,14 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
-        HELM_CHART = './helm-chart'
+        HELM_CHART = './rs-school-app'
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
     }
 
     triggers {
-        pollSCM('H/5 * * * *')
+        githubPush()
     }
 
     stages {
@@ -23,7 +23,7 @@ pipeline {
                 checkout scm
             }
         }
-        stage('Build App') {
+        stage('Build') {
             steps {
                 sh 'npm install'
                 sh 'npm run build'
@@ -42,9 +42,19 @@ pipeline {
                         -Dsonar.projectKey=rs-school-stars-shine \
                         -Dsonar.sources=src \
                         -Dsonar.host.url=https://sonarqube.codershub.top \
-                        -Dsonar.login=${SONAR_TOKEN}
+                        -Dsonar.login=${SONAR_TOKEN} \
+                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
                         """
-                        sh "npx sonar-scanner ${sonarParams}"
+                        if (env.CHANGE_ID) {
+                            sonarParams += """
+                            -Dsonar.pullrequest.key=${env.CHANGE_ID} \
+                            -Dsonar.pullrequest.branch=${env.CHANGE_BRANCH} \
+                            -Dsonar.pullrequest.base=${env.CHANGE_TARGET}
+                            """
+                        } else {
+                            sonarParams += "-Dsonar.branch.name=${env.BRANCH_NAME}"
+                        }
+                        sh "npx sonar-scanner@latest ${sonarParams}"
                     }
                 }
             }
@@ -67,7 +77,7 @@ pipeline {
                 }
             }
         }
-        stage('Deploy to K3s') {
+        stage('Deploy to Kubernetes') {
             steps {
                 sh 'mkdir -p ~/.kube && echo "${KUBE_CONFIG}" > ~/.kube/config'
                 sh """
@@ -78,7 +88,7 @@ pipeline {
                 """
             }
         }
-        stage('Verification') {
+        stage('Application Verification') {
             steps {
                 sh 'sleep 30'
                 sh 'kubectl get pods -n default | grep rs-school-app || exit 1'
@@ -88,14 +98,18 @@ pipeline {
     }
     post {
         success {
-            emailext subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                     body: "App deployed to https://rsschool.codershub.top",
-                     to: 'edy@codershub.top'
+            emailext (
+                subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "The pipeline succeeded. Application deployed to https://rsschool.codershub.top",
+                to: 'your.email@example.com'
+            )
         }
         failure {
-            emailext subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                     body: "Failed: ${env.BUILD_URL}",
-                     to: 'edy@codershub.top'
+            emailext (
+                subject: "FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "The pipeline failed. Check console output at ${env.BUILD_URL}",
+                to: 'your.email@example.com'
+            )
         }
         always {
             sh 'docker logout || true'
