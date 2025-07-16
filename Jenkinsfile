@@ -11,10 +11,6 @@ pipeline {
         KUBE_PORT = '31001'
     }
 
-    triggers {
-        githubPush()
-    }
-
     stages {
         stage('Checkout') {
             steps {
@@ -81,65 +77,70 @@ pipeline {
             }
         }
 
-        stage('Create Helm Chart Dynamically') {
+        stage('Create Clean Helm Chart') {
             steps {
                 sh '''
                     rm -rf ${CHART_NAME}
-                    helm create ${CHART_NAME}
+                    mkdir -p ${CHART_NAME}/templates
+
+                    cat <<EOF > ${CHART_NAME}/Chart.yaml
+apiVersion: v2
+name: ${CHART_NAME}
+version: 0.1.0
+EOF
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: ${DOCKER_IMAGE}
   pullPolicy: IfNotPresent
   tag: "${BUILD_NUMBER}"
 
-serviceAccount:
-  create: false
-  name: ""
-
 service:
   type: NodePort
   port: 80
   targetPort: 9999
   nodePort: ${KUBE_PORT}
-
-ingress:
-  enabled: true
-  className: ""
-  annotations: {}
-  hosts:
-    - host: rsschool.codershub.top
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-
-autoscaling:
-  enabled: false
 EOF
 
-                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/targetPort: 9999/a\
-      nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
-                '''
-            }
-        }
+                    cat <<EOF > ${CHART_NAME}/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${RELEASE_NAME}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: ${RELEASE_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${RELEASE_NAME}
+    spec:
+      containers:
+      - name: ${RELEASE_NAME}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        ports:
+        - containerPort: 9999
+EOF
 
-        stage('Validate YAML (optional)') {
-            steps {
-                script {
-                    // Ensure yamllint is installed and accessible
-                    sh '''
-                        export PATH=$HOME/.local/bin:$PATH
-                        if ! command -v yamllint > /dev/null; then
-                            echo "Installing yamllint..."
-                            pip install --user yamllint
-                        fi
-                        yamllint ${CHART_NAME} || true
-                    '''
-                }
+                    cat <<EOF > ${CHART_NAME}/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${RELEASE_NAME}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: ${RELEASE_NAME}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      nodePort: {{ .Values.service.nodePort }}
+EOF
+                '''
             }
         }
 
@@ -152,10 +153,10 @@ EOF
                         chmod 600 ~/.kube/config
 
                         helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                        --namespace default \
-                        --set image.repository=${DOCKER_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER} \
-                        --wait --timeout 5m
+                          --namespace default \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER} \
+                          --wait --timeout 5m
                     '''
                 }
             }
