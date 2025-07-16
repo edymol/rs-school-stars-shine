@@ -123,11 +123,13 @@ EOF
                     sudo chmod +x /usr/bin/yq
 
                     # Patch Helm chart YAML safely
-                    yq -i '.spec.template.spec.containers[0].ports[0].containerPort = 9999' rs-school-chart/templates/deployment.yaml
-                    yq -i '
-                      .spec.ports[0].targetPort = 9999 |
-                      .spec.ports[0].nodePort = "{{ .Values.service.nodePort }}"
-                    ' rs-school-chart/templates/service.yaml
+                    # Replace containerPort in deployment.yaml using sed
+                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
+
+                    # Replace targetPort and insert nodePort in service.yaml using sed
+                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+                    sed -i "/targetPort: 9999/a \ \ \ \ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
+
 
                     rm ${CHART_NAME}/templates/*.bak
                 '''
