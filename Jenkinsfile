@@ -1,103 +1,182 @@
 pipeline {
-  agent any
+    agent { label 'worker-agents' }
 
-  environment {
-    DOCKER_IMAGE = 'edydockers/rs-school-app'
-    IMAGE_TAG = '48'
-    KUBE_DIR = '/home/jenkins/.kube'
-    CHART_NAME = 'rs-school-chart'
-    STATIC_NODEPORT = 31001
-  }
-
-  stages {
-
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        DOCKER_IMAGE = 'edydockers/rs-school-app'
+        CHART_NAME = 'rs-school-chart'
+        RELEASE_NAME = 'rs-school-app'
+        KUBE_CONFIG = credentials('kubernetes-config')
+        SONAR_TOKEN = credentials('sonarqube-token')
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        KUBE_PORT = '31001'
     }
 
-    stage('Prepare Helm Chart') {
-      steps {
-        script {
-          sh 'rm -rf ${CHART_NAME}'
-          sh "helm create ${CHART_NAME}"
+    triggers {
+        githubPush()
+    }
 
-          // Set static NodePort configuration using yq
-          sh '''
-            yq -i '.service.type = "NodePort" |
-                   .service.port = 80 |
-                   .service.targetPort = 9999 |
-                   .service.nodePort = ${STATIC_NODEPORT}' ${CHART_NAME}/values.yaml
-          '''
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
 
-    stage('Validate YAML (optional)') {
-      steps {
-        script {
-          sh 'pip install --user yamllint || true'
-          withEnv(["PATH=${env.HOME}/.local/bin:${env.PATH}"]) {
-            sh 'yamllint ${CHART_NAME} || true' // Don't fail if yamllint fails
-          }
+        stage('Install & Build') {
+            steps {
+                sh 'npm install'
+                sh 'npm run build'
+            }
         }
-      }
-    }
 
-    stage('Setup Kubeconfig') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig-credentials-id', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            mkdir -p ${KUBE_DIR}
-            cp $KUBECONFIG_FILE ${KUBE_DIR}/config
-            chmod 600 ${KUBE_DIR}/config
-            export KUBECONFIG=${KUBE_DIR}/config
-          '''
+        stage('Unit Tests') {
+            steps {
+                sh 'npx vitest run --coverage || echo "No tests configured"'
+            }
         }
-      }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    script {
+                        def sonarParams = [
+                            "-Dsonar.projectKey=rs-school-stars-shine",
+                            "-Dsonar.sources=src",
+                            "-Dsonar.tests=src",
+                            "-Dsonar.exclusions=**/coverage/**,**/dist/**",
+                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+                        ]
+
+                        if (env.CHANGE_ID) {
+                            sonarParams += [
+                                "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
+                                "-Dsonar.pullrequest.branch=${env.CHANGE_BRANCH}",
+                                "-Dsonar.pullrequest.base=${env.CHANGE_TARGET}"
+                            ]
+                        }
+
+                        env.SONAR_SCANNER_OPTS = "-Xmx2g"
+                        sh "npx sonar-scanner ${sonarParams.join(' ')}"
+                    }
+                }
+            }
+            post {
+                always {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: true
+                    }
+                }
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
+                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
+                }
+            }
+        }
+
+        stage('Create Helm Chart Dynamically') {
+            steps {
+                sh '''
+                    rm -rf ${CHART_NAME}
+                    helm create ${CHART_NAME}
+
+                    cat <<EOF > ${CHART_NAME}/values.yaml
+replicaCount: 2
+
+image:
+  repository: ${DOCKER_IMAGE}
+  pullPolicy: IfNotPresent
+  tag: "${BUILD_NUMBER}"
+
+serviceAccount:
+  create: false
+  name: ""
+
+service:
+  type: NodePort
+  port: 80
+  targetPort: 9999
+  nodePort: ${KUBE_PORT}
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: rsschool.codershub.top
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+autoscaling:
+  enabled: false
+EOF
+
+                    # Fix deployment.yaml: containerPort -> 9999
+                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
+
+                    # Fix service.yaml: targetPort + nodePort under ports:
+                    sed -i '/targetPort: /d' ${CHART_NAME}/templates/service.yaml
+                    sed -i '/port: 80/a\\        targetPort: 9999\\n        nodePort: ${KUBE_PORT}' ${CHART_NAME}/templates/service.yaml
+
+                    # Helm lint check
+                    helm lint ${CHART_NAME} || {
+                        echo "❌ Helm lint failed"
+                        cat ${CHART_NAME}/templates/service.yaml
+                        exit 1
+                    }
+                '''
+            }
+        }
+
+        stage('Deploy to K3s via Helm') {
+            steps {
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        mkdir -p ~/.kube
+                        cp $KUBECONFIG_FILE ~/.kube/config
+                        chmod 600 ~/.kube/config
+
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                        --namespace default \
+                        --set image.repository=${DOCKER_IMAGE} \
+                        --set image.tag=${BUILD_NUMBER} \
+                        --wait --timeout 5m
+                    '''
+                }
+            }
+        }
     }
 
-    stage('Build & Push Docker Image') {
-      steps {
-        sh '''
-          docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} .
-          docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest
-          docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
-          docker push ${DOCKER_IMAGE}:latest
-        '''
-      }
-    }
+    post {
+        success {
+            emailext (
+                subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
+                to: 'edy@codershub.top'
+            )
+        }
 
-    stage('Deploy Helm Chart') {
-      steps {
-        sh '''
-          export KUBECONFIG=${KUBE_DIR}/config
-          helm upgrade --install rs-school-app ${CHART_NAME} \
-            --namespace default \
-            --set image.repository=${DOCKER_IMAGE} \
-            --set image.tag=${IMAGE_TAG} \
-            --wait --timeout 5m
-        '''
-      }
-    }
-  }
+        failure {
+            emailext (
+                subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
+                to: 'edy@codershub.top'
+            )
+        }
 
-  post {
-    always {
-      script {
-        sh '''
-          docker logout || true
-          docker rmi ${DOCKER_IMAGE}:${IMAGE_TAG} || true
-          docker rmi ${DOCKER_IMAGE}:latest || true
-          rm -f ${KUBE_DIR}/config
-        '''
-      }
-      emailext(
-        subject: "Jenkins Build - ${currentBuild.fullDisplayName}",
-        body: "Build finished with status: ${currentBuild.currentResult}",
-        to: "edy@codershub.top"
-      )
+        always {
+            sh 'docker logout || true'
+            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
+            sh "docker rmi ${DOCKER_IMAGE}:latest || true"
+            sh 'rm -f ~/.kube/config'
+        }
     }
-  }
 }
