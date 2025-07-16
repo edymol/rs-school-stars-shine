@@ -118,19 +118,16 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Patch deployment to use container port 9999
-                    sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
+                    # Install yq if needed
+                    sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+                    sudo chmod +x /usr/bin/yq
 
-                    # Patch service to use targetPort 9999 and remove any existing nodePort lines
-                    sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/nodePort:/d' ${CHART_NAME}/templates/service.yaml
-
-                    # Insert nodePort under targetPort with proper Helm template syntax, using the variable from values.yaml
-                    awk '/targetPort: 9999/ {
-                                        print;
-                                        print "        nodePort: {{ .Values.service.nodePort }}";
-                                        next
-                                    }1' ${CHART_NAME}/templates/service.yaml > tmp.yaml && mv tmp.yaml ${CHART_NAME}/templates/service.yaml
+                    # Patch Helm chart YAML safely
+                    yq -i '.spec.template.spec.containers[0].ports[0].containerPort = 9999' rs-school-chart/templates/deployment.yaml
+                    yq -i '
+                      .spec.ports[0].targetPort = 9999 |
+                      .spec.ports[0].nodePort = "{{ .Values.service.nodePort }}"
+                    ' rs-school-chart/templates/service.yaml
 
                     rm ${CHART_NAME}/templates/*.bak
                 '''
