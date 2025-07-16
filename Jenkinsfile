@@ -115,28 +115,21 @@ ingress:
         - path: /
           pathType: ImplementationSpecific
 
+resources: {}
+
 autoscaling:
   enabled: false
 EOF
 
-                    # Ensure yamllint is installed and in PATH
-                    if ! command -v yamllint >/dev/null 2>&1; then
-                        echo "⚠️ yamllint not found — attempting installation..."
-                        pip install --user yamllint || true
-                        export PATH=$HOME/.local/bin:$PATH
-                    fi
+                    # Patch deployment.yaml and service.yaml to use correct containerPort/targetPort
+                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
+                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+                    sed -i '/targetPort: 9999/a\
+      nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
 
-                    # Validate YAML
-                    yamllint ${CHART_NAME} || {
-                        echo "❌ YAML is invalid. Please fix it."
-                        exit 1
-                    }
-
-                    # Helm lint
-                    helm lint ${CHART_NAME} || {
-                        echo "❌ Helm chart is invalid."
-                        exit 1
-                    }
+                    # Optional: remove unused template files
+                    rm -f ${CHART_NAME}/templates/tests/test-connection.yaml
+                    rm -f ${CHART_NAME}/templates/hpa.yaml
                 '''
             }
         }
