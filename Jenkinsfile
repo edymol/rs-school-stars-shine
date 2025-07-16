@@ -118,20 +118,10 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Install yq if needed
-                    sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-                    sudo chmod +x /usr/bin/yq
-
-                    # Patch Helm chart YAML safely
-                    # Replace containerPort in deployment.yaml using sed
+                    # Patch Helm chart YAML using sed instead of yq (yq fails on Go template syntax)
                     sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-
-                    # Replace targetPort and insert nodePort in service.yaml using sed
                     sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-                    sed -i "/targetPort: 9999/a \ \ \ \ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
-
-
-                    rm ${CHART_NAME}/templates/*.bak
+                    sed -i '/targetPort: 9999/a \\    nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
                 '''
             }
         }
