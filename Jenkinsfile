@@ -100,6 +100,7 @@ image:
 
 serviceAccount:
   create: false
+  annotations: {}
   name: ""
 
 service:
@@ -107,7 +108,14 @@ service:
   port: 9999
 
 ingress:
-  enabled: false
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
 
 autoscaling:
   enabled: false
