@@ -102,6 +102,7 @@ serviceAccount:
 service:
   type: NodePort
   port: 80
+  targetPort: 9999
   nodePort: ${KUBE_PORT}
 
 ingress:
@@ -118,30 +119,24 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Update container and service ports
-                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-
-                    # Safely inject nodePort line under targetPort with correct YAML indentation
-                    sed -i "/targetPort: 9999/a\\        nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
-
-                    # Attempt to install yamllint (fallback if missing)
+                    # Ensure yamllint is installed and in PATH
                     if ! command -v yamllint >/dev/null 2>&1; then
                         echo "⚠️ yamllint not found — attempting installation..."
-                        pip install --user yamllint || echo "⚠️ Failed to install yamllint via pip"
+                        pip install --user yamllint || true
                         export PATH=$HOME/.local/bin:$PATH
                     fi
 
-                    # Validate the modified YAML (or skip if still not available)
-                    if command -v yamllint >/dev/null 2>&1; then
-                        yamllint ${CHART_NAME}/templates/service.yaml || {
-                            echo "❌ YAML is invalid. File content:"
-                            cat ${CHART_NAME}/templates/service.yaml
-                            exit 1
-                        }
-                    else
-                        echo "⚠️ yamllint still not available. Skipping YAML lint check."
-                    fi
+                    # Validate YAML
+                    yamllint ${CHART_NAME} || {
+                        echo "❌ YAML is invalid. Please fix it."
+                        exit 1
+                    }
+
+                    # Helm lint
+                    helm lint ${CHART_NAME} || {
+                        echo "❌ Helm chart is invalid."
+                        exit 1
+                    }
                 '''
             }
         }
@@ -153,16 +148,13 @@ EOF
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
                         chmod 600 ~/.kube/config
-                    '''
-                    sh """
+
                         helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
                         --namespace default \
                         --set image.repository=${DOCKER_IMAGE} \
                         --set image.tag=${BUILD_NUMBER} \
-                        --set service.type=NodePort \
-                        --set service.nodePort=${KUBE_PORT} \
                         --wait --timeout 5m
-                    """
+                    '''
                 }
             }
         }
