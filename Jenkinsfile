@@ -8,6 +8,7 @@ pipeline {
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        KUBE_PORT = '31001'
     }
 
     triggers {
@@ -117,12 +118,15 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Patch deployment & service template to use custom port
+                    # Patch deployment to use container port 9999
                     sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
+
+                    # Patch service to use targetPort 9999 and static nodePort
                     sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
 
-                    # Ensure service.yaml respects .Values.service.nodePort
-                    yq e '.spec.ports[0].nodePort = "{{ .Values.service.nodePort }}"' -i ${CHART_NAME}/templates/service.yaml
+                    # Inject nodePort directly into the service template
+                    sed -i '/nodePort:/d' ${CHART_NAME}/templates/service.yaml
+                    sed -i "/targetPort: 9999/a \ \ \ \ \ \ \ \ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
 
                     rm ${CHART_NAME}/templates/*.bak
                 '''
@@ -155,7 +159,7 @@ EOF
         success {
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "✅ Deployment complete. App is available at: http://192.168.0.101:9999",
+                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
                 to: 'edy@codershub.top'
             )
         }
