@@ -89,50 +89,69 @@ pipeline {
                     helm create ${CHART_NAME}
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
-replicaCount: 2
+        replicaCount: 2
 
-image:
-  repository: ${DOCKER_IMAGE}
-  pullPolicy: IfNotPresent
-  tag: "${BUILD_NUMBER}"
+        image:
+          repository: ${DOCKER_IMAGE}
+          pullPolicy: IfNotPresent
+          tag: "${BUILD_NUMBER}"
 
-serviceAccount:
-  create: false
-  name: ""
+        serviceAccount:
+          create: false
+          name: ""
 
-service:
-  type: NodePort
-  port: 80
-  nodePort: 31001
+        service:
+          type: NodePort
+          port: 80
+          nodePort: ${KUBE_PORT}
 
-ingress:
-  enabled: true
-  className: ""
-  annotations: {}
-  hosts:
-    - host: rsschool.codershub.top
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
+        ingress:
+          enabled: true
+          className: ""
+          annotations: {}
+          hosts:
+            - host: rsschool.codershub.top
+              paths:
+                - path: /
+                  pathType: ImplementationSpecific
 
-autoscaling:
-  enabled: false
-EOF
+        autoscaling:
+          enabled: false
+        EOF
 
                     # Patch deployment to use container port 9999
                     sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
 
-                    # Patch service to use targetPort 9999 and static nodePort
+                    # Patch service to use targetPort 9999 and remove any existing nodePort lines
                     sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
-
-                    # Inject nodePort directly into the service template
-                    # Remove any existing nodePort lines
                     sed -i '/nodePort:/d' ${CHART_NAME}/templates/service.yaml
 
-                    # Add nodePort line properly under targetPort
-                    sed -i "/targetPort: 9999/a \\\\ \\ \\ \\ \\ \\ \\ \\ \\ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
+                    # Insert nodePort under targetPort with proper Helm template syntax, using the variable from values.yaml
+                    sed -i "/targetPort: 9999/a \\\\        nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
+
                     rm ${CHART_NAME}/templates/*.bak
                 '''
+            }
+        }
+
+        stage('Deploy to K3s via Helm') {
+            steps {
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        mkdir -p ~/.kube
+                        cp $KUBECONFIG_FILE ~/.kube/config
+                        chmod 600 ~/.kube/config
+                    '''
+                    sh """
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                        --namespace default \
+                        --set image.repository=${DOCKER_IMAGE} \
+                        --set image.tag=${BUILD_NUMBER} \
+                        --set service.type=NodePort \
+                        --set service.nodePort=${KUBE_PORT} \
+                        --wait --timeout 5m
+                    """
+                }
             }
         }
 
