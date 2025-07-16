@@ -9,7 +9,6 @@ pipeline {
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
         KUBE_PORT = '31001'
-
     }
 
     triggers {
@@ -89,35 +88,35 @@ pipeline {
                     helm create ${CHART_NAME}
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
-        replicaCount: 2
+replicaCount: 2
 
-        image:
-          repository: ${DOCKER_IMAGE}
-          pullPolicy: IfNotPresent
-          tag: "${BUILD_NUMBER}"
+image:
+  repository: ${DOCKER_IMAGE}
+  pullPolicy: IfNotPresent
+  tag: "${BUILD_NUMBER}"
 
-        serviceAccount:
-          create: false
-          name: ""
+serviceAccount:
+  create: false
+  name: ""
 
-        service:
-          type: NodePort
-          port: 80
-          nodePort: ${KUBE_PORT}
+service:
+  type: NodePort
+  port: 80
+  nodePort: ${KUBE_PORT}
 
-        ingress:
-          enabled: true
-          className: ""
-          annotations: {}
-          hosts:
-            - host: rsschool.codershub.top
-              paths:
-                - path: /
-                  pathType: ImplementationSpecific
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: rsschool.codershub.top
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
 
-        autoscaling:
-          enabled: false
-        EOF
+autoscaling:
+  enabled: false
+EOF
 
                     # Patch deployment to use container port 9999
                     sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
@@ -154,28 +153,7 @@ pipeline {
                 }
             }
         }
-
-        stage('Deploy to K3s via Helm') {
-            steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                    sh '''
-                        mkdir -p ~/.kube
-                        cp $KUBECONFIG_FILE ~/.kube/config
-                        chmod 600 ~/.kube/config
-                    '''
-                    sh """
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                        --namespace default \
-                        --set image.repository=${DOCKER_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER} \
-                        --set service.type=NodePort \
-                        --set service.nodePort=31001 \
-                        --wait --timeout 5m
-                    """
-                }
-            }
-        }
-
+    }
 
     post {
         success {
