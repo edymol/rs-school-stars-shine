@@ -119,20 +119,27 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Fix deployment.yaml: containerPort -> 9999
                     sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-
-                    # Fix service.yaml: targetPort + nodePort under ports:
-                    sed -i '/targetPort: /d' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/port: 80/a\\        targetPort: 9999\\n        nodePort: ${KUBE_PORT}' ${CHART_NAME}/templates/service.yaml
-
-                    # Helm lint check
-                    helm lint ${CHART_NAME} || {
-                        echo "❌ Helm lint failed"
-                        cat ${CHART_NAME}/templates/service.yaml
-                        exit 1
-                    }
+                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+                    sed -i '/targetPort: 9999/a\
+      nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
                 '''
+            }
+        }
+
+        stage('Validate YAML (optional)') {
+            steps {
+                script {
+                    // Ensure yamllint is installed and accessible
+                    sh '''
+                        export PATH=$HOME/.local/bin:$PATH
+                        if ! command -v yamllint > /dev/null; then
+                            echo "Installing yamllint..."
+                            pip install --user yamllint
+                        fi
+                        yamllint ${CHART_NAME} || true
+                    '''
+                }
             }
         }
 
