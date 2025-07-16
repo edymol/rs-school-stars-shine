@@ -118,20 +118,29 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Replace ports and insert nodePort correctly
+                    # Update container and service ports
                     sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
                     sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/targetPort: 9999/a\\        nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
 
-                    # Validate YAML (only if yamllint is installed)
+                    # Safely inject nodePort line under targetPort with correct YAML indentation
+                    sed -i "/targetPort: 9999/a\\        nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
+
+                    # Attempt to install yamllint (fallback if missing)
+                    if ! command -v yamllint >/dev/null 2>&1; then
+                        echo "⚠️ yamllint not found — attempting installation..."
+                        pip install --user yamllint || echo "⚠️ Failed to install yamllint via pip"
+                        export PATH=$HOME/.local/bin:$PATH
+                    fi
+
+                    # Validate the modified YAML (or skip if still not available)
                     if command -v yamllint >/dev/null 2>&1; then
                         yamllint ${CHART_NAME}/templates/service.yaml || {
-                            echo "❌ YAML is invalid. Here's the file content:"
+                            echo "❌ YAML is invalid. File content:"
                             cat ${CHART_NAME}/templates/service.yaml
                             exit 1
                         }
                     else
-                        echo "⚠️ yamllint not found — skipping YAML lint check"
+                        echo "⚠️ yamllint still not available. Skipping YAML lint check."
                     fi
                 '''
             }
