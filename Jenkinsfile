@@ -9,6 +9,9 @@ pipeline {
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
         KUBE_PORT = '31001'
+        // Define your Slack channel here, e.g., for general notifications
+        SLACK_CHANNEL = '#github-trello-jenkins-updates' // Use the channel you renamed!
+        SLACK_INTEGRATION_ID = 'slack' // The ID of your Slack credential in Jenkins
     }
 
     stages {
@@ -165,22 +168,47 @@ EOF
 
     post {
         success {
+            // Email notification
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                 body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
                 to: 'edy@codershub.top'
             )
+            // Slack notification for success
+            slackSend (
+                channel: "${SLACK_CHANNEL}",
+                color: 'good', // Green color for success
+                message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
+            )
         }
 
         failure {
+            // Email notification
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                 body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
                 to: 'edy@codershub.top'
             )
+            // Slack notification for failure
+            slackSend (
+                channel: "${SLACK_CHANNEL}",
+                color: 'danger', // Red color for failure
+                message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
+            )
         }
 
         always {
+            // Slack notification for always (can be used for 'fixed' or 'aborted' too)
+            // For a general 'always' message, you might want to be more generic or specific
+            // based on build status (e.g., if you only want success/failure, remove this 'always' block)
+            // Example: To notify about any final status
+            // slackSend (
+            //     channel: "${SLACK_CHANNEL}",
+            //     color: "${currentBuild.currentResult == 'SUCCESS' ? 'good' : (currentBuild.currentResult == 'FAILURE' ? 'danger' : 'warning')}",
+            //     message: "Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) finished with status: *${currentBuild.currentResult}*. <${env.BUILD_URL}|View Build>"
+            // )
+
+            // Clean up steps
             sh 'docker logout || true'
             sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
             sh "docker rmi ${DOCKER_IMAGE}:latest || true"
