@@ -27,7 +27,7 @@ export const Hero = () => {
 
         <div className="animate-fade-in">
           <h1 className="text-6xl md:text-8xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent mb-6 leading-tight">
-            RS School
+            RS School with love
           </h1>
           <p className="text-2xl md:text-3xl text-gray-700 mb-8 font-light">
             Empowering Developers, Building Community
