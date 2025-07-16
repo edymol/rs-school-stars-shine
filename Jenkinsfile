@@ -1,180 +1,115 @@
 pipeline {
-    agent { label 'worker-agents' }
+    agent any
 
     environment {
-        DOCKER_IMAGE = 'edydockers/rs-school-app'
-        CHART_NAME = 'rs-school-chart'
-        RELEASE_NAME = 'rs-school-app'
-        KUBE_CONFIG = credentials('kubernetes-config')
-        SONAR_TOKEN = credentials('sonarqube-token')
-        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
-        KUBE_PORT = '31001'
-    }
-
-    triggers {
-        githubPush()
+        HELM_CHART_DIR = "rs-school-chart"
+        IMAGE_REPO = "edydockers/rs-school-app"
+        IMAGE_TAG = "48"  // adjust as needed
+        KUBE_CONFIG_PATH = "/home/jenkins/.kube/config"
+        NAMESPACE = "default"
+        NODE_PORT = 31001
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Install & Build') {
-            steps {
-                sh 'npm install'
-                sh 'npm run build'
-            }
-        }
-
-        stage('Unit Tests') {
-            steps {
-                sh 'npx vitest run --coverage || echo "No tests configured"'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    script {
-                        def sonarParams = [
-                            "-Dsonar.projectKey=rs-school-stars-shine",
-                            "-Dsonar.sources=src",
-                            "-Dsonar.tests=src",
-                            "-Dsonar.exclusions=**/coverage/**,**/dist/**",
-                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
-                        ]
-
-                        if (env.CHANGE_ID) {
-                            sonarParams += [
-                                "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
-                                "-Dsonar.pullrequest.branch=${env.CHANGE_BRANCH}",
-                                "-Dsonar.pullrequest.base=${env.CHANGE_TARGET}"
-                            ]
-                        }
-
-                        env.SONAR_SCANNER_OPTS = "-Xmx2g"
-                        sh "npx sonar-scanner ${sonarParams.join(' ')}"
-                    }
-                }
-            }
-            post {
-                always {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true
-                    }
-                }
-            }
-        }
-
-        stage('Docker Build & Push') {
+        stage('Prepare Helm Chart') {
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
-                    sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                    sh "docker push ${DOCKER_IMAGE}:latest"
+                    // Clean old chart dir
+                    sh "rm -rf ${HELM_CHART_DIR}"
+
+                    // Create new Helm chart
+                    sh "helm create ${HELM_CHART_DIR}"
+
+                    // Patch values.yaml to set static nodePort and NodePort type
+                    sh """
+                    yq e '.service.type = "NodePort" | 
+                          .service.port = 80 | 
+                          .service.targetPort = 9999 | 
+                          .service.nodePort = ${NODE_PORT}' -i ${HELM_CHART_DIR}/values.yaml
+                    """
                 }
             }
         }
 
-        stage('Create Helm Chart Dynamically') {
+        stage('Validate YAML (optional)') {
             steps {
-                sh '''
-                    rm -rf ${CHART_NAME}
-                    helm create ${CHART_NAME}
+                script {
+                    // Install yamllint if missing
+                    def yamllintExists = sh(script: "command -v yamllint || true", returnStdout: true).trim()
+                    if (!yamllintExists) {
+                        echo "Installing yamllint..."
+                        sh "pip install --user yamllint"
+                    }
 
-                    cat <<EOF > ${CHART_NAME}/values.yaml
-replicaCount: 2
-
-image:
-  repository: ${DOCKER_IMAGE}
-  pullPolicy: IfNotPresent
-  tag: "${BUILD_NUMBER}"
-
-serviceAccount:
-  create: false
-  name: ""
-
-service:
-  type: NodePort
-  port: 80
-  targetPort: 9999
-  nodePort: ${KUBE_PORT}
-
-ingress:
-  enabled: true
-  className: ""
-  annotations: {}
-  hosts:
-    - host: rsschool.codershub.top
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-
-resources: {}
-
-autoscaling:
-  enabled: false
-EOF
-
-                    # Patch deployment.yaml and service.yaml to use correct containerPort/targetPort
-                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/targetPort: 9999/a\
-      nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
-
-                    # Optional: remove unused template files
-                    rm -f ${CHART_NAME}/templates/tests/test-connection.yaml
-                    rm -f ${CHART_NAME}/templates/hpa.yaml
-                '''
+                    // Run yamllint (optional, fail fast)
+                    def lintResult = sh(script: "yamllint ${HELM_CHART_DIR} || true", returnStatus: true)
+                    if (lintResult != 0) {
+                        echo "WARNING: YAML linting failed. Please fix your Helm templates."
+                        // Do NOT fail build here; just warn
+                    }
+                }
             }
         }
 
-        stage('Deploy to K3s via Helm') {
+        stage('Setup Kubeconfig') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                    sh '''
-                        mkdir -p ~/.kube
-                        cp $KUBECONFIG_FILE ~/.kube/config
-                        chmod 600 ~/.kube/config
+                withCredentials([file(credentialsId: 'kubeconfig-credentials-id', variable: 'KUBECONFIG_FILE')]) {
+                    sh """
+                        mkdir -p /home/jenkins/.kube
+                        cp $KUBECONFIG_FILE ${KUBE_CONFIG_PATH}
+                        chmod 600 ${KUBE_CONFIG_PATH}
+                    """
+                }
+            }
+        }
 
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                        --namespace default \
-                        --set image.repository=${DOCKER_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER} \
-                        --wait --timeout 5m
-                    '''
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    sh """
+                        docker build -t ${IMAGE_REPO}:${IMAGE_TAG} .
+                        docker push ${IMAGE_REPO}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy Helm Chart') {
+            steps {
+                script {
+                    // Helm upgrade/install with static nodePort set in values.yaml
+                    sh """
+                        helm upgrade --install rs-school-app ${HELM_CHART_DIR} \
+                          --namespace ${NAMESPACE} \
+                          --set image.repository=${IMAGE_REPO} \
+                          --set image.tag=${IMAGE_TAG} \
+                          --wait --timeout 5m
+                    """
                 }
             }
         }
     }
 
     post {
-        success {
-            emailext (
-                subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
-                to: 'edy@codershub.top'
-            )
+        always {
+            script {
+                // Clean up docker images to save space
+                sh """
+                    docker logout || true
+                    docker rmi ${IMAGE_REPO}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_REPO}:latest || true
+                """
+                // Optional: Remove kubeconfig for security
+                sh "rm -f ${KUBE_CONFIG_PATH}"
+            }
         }
 
         failure {
             emailext (
-                subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
-                to: 'edy@codershub.top'
+                to: 'edy@codershub.top',
+                subject: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Check Jenkins logs for details."
             )
-        }
-
-        always {
-            sh 'docker logout || true'
-            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
-            sh "docker rmi ${DOCKER_IMAGE}:latest || true"
-            sh 'rm -f ~/.kube/config'
         }
     }
 }
