@@ -1,10 +1,6 @@
 pipeline {
     agent { label 'worker-agents' }
 
-//     tools {
-//         nodejs 'nodejs20'
-//     }
-
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         CHART_NAME = 'rs-school-chart'
@@ -103,8 +99,9 @@ serviceAccount:
   name: ""
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 80
+  nodePort: 31001
 
 ingress:
   enabled: true
@@ -130,33 +127,21 @@ EOF
 
         stage('Deploy to K3s via Helm') {
             steps {
-               withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                   sh '''
-                       mkdir -p ~/.kube
-                       cp $KUBECONFIG_FILE ~/.kube/config
-                       chmod 600 ~/.kube/config
-                   '''
-                   sh """
-                       helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                       --namespace default \
-                       --set image.repository=${DOCKER_IMAGE} \
-                       --set image.tag=${BUILD_NUMBER} \
-                       --wait --timeout 5m
-                   """
-                }
-            }
-        }
-
-        stage('Patch Service to NodePort') {
-            steps {
                 withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh '''
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
                         chmod 600 ~/.kube/config
-
-                        kubectl patch svc ${RELEASE_NAME}-${CHART_NAME} -n default -p '{"spec": {"type": "NodePort"}}'
-                   '''
+                    '''
+                    sh """
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                        --namespace default \
+                        --set image.repository=${DOCKER_IMAGE} \
+                        --set image.tag=${BUILD_NUMBER} \
+                        --set service.type=NodePort \
+                        --set service.nodePort=31001 \
+                        --wait --timeout 5m
+                    """
                 }
             }
         }
