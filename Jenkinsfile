@@ -125,9 +125,11 @@ EOF
                     sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
 
                     # Inject nodePort directly into the service template
+                    # Remove any existing nodePort lines
                     sed -i '/nodePort:/d' ${CHART_NAME}/templates/service.yaml
-                    sed -i "/targetPort: 9999/a \ \ \ \ \ \ \ \ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
 
+                    # Add nodePort line properly under targetPort
+                    sed -i "/targetPort: 9999/a \\\\ \\ \\ \\ \\ \\ \\ \\ \\ nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
                     rm ${CHART_NAME}/templates/*.bak
                 '''
             }
