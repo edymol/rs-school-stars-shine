@@ -117,9 +117,13 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Patch deployment & service template
+                    # Patch deployment & service template to use custom port
                     sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
                     sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
+
+                    # Ensure service.yaml respects .Values.service.nodePort
+                    yq e '.spec.ports[0].nodePort = "{{ .Values.service.nodePort }}"' -i ${CHART_NAME}/templates/service.yaml
+
                     rm ${CHART_NAME}/templates/*.bak
                 '''
             }
