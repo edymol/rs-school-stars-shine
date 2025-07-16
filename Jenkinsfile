@@ -118,27 +118,22 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Replace containerPort and targetPort
-    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+                    # Replace ports and insert nodePort correctly
+                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
+                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+                    sed -i '/targetPort: 9999/a\\        nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
 
-    # Insert nodePort correctly aligned under targetPort
-    sed -i "/targetPort: 9999/a\\
-    nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
-
-    # Install yamllint if not present (optional for local Jenkins agents)
-    if ! command -v yamllint >/dev/null 2>&1; then
-        echo "yamllint not found. Installing..."
-        pip install yamllint || true
-    fi
-
-    # Validate the YAML file
-    yamllint ${CHART_NAME}/templates/service.yaml || {
-        echo "❌ YAML is invalid. Here's the file content:"
-        cat ${CHART_NAME}/templates/service.yaml
-        exit 1
-    }
-'''
+                    # Validate YAML (only if yamllint is installed)
+                    if command -v yamllint >/dev/null 2>&1; then
+                        yamllint ${CHART_NAME}/templates/service.yaml || {
+                            echo "❌ YAML is invalid. Here's the file content:"
+                            cat ${CHART_NAME}/templates/service.yaml
+                            exit 1
+                        }
+                    else
+                        echo "⚠️ yamllint not found — skipping YAML lint check"
+                    fi
+                '''
             }
         }
 
