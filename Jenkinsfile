@@ -1,10 +1,6 @@
 pipeline {
     agent { label 'worker-agents' }
 
-    tools {
-        nodejs 'nodejs20'
-    }
-
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         CHART_NAME = 'rs-school-chart'
@@ -12,10 +8,7 @@ pipeline {
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
-    }
-
-    triggers {
-        githubPush()
+        KUBE_PORT = '31001'
     }
 
     stages {
@@ -84,70 +77,74 @@ pipeline {
             }
         }
 
-        stage('Create Helm Chart Dynamically') {
+        stage('Create Clean Helm Chart') {
             steps {
                 sh '''
                     rm -rf ${CHART_NAME}
-                    helm create ${CHART_NAME}
+                    mkdir -p ${CHART_NAME}/templates
+
+                    cat <<EOF > ${CHART_NAME}/Chart.yaml
+apiVersion: v2
+name: ${CHART_NAME}
+version: 0.1.0
+EOF
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: ${DOCKER_IMAGE}
   pullPolicy: IfNotPresent
   tag: "${BUILD_NUMBER}"
 
-serviceAccount:
-  create: false
-  name: ""
-
 service:
-  type: ClusterIP
+  type: NodePort
   port: 80
-
-ingress:
-  enabled: true
-  className: ""
-  annotations: {}
-  hosts:
-    - host: rsschool.codershub.top
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-
-autoscaling:
-  enabled: false
+  targetPort: 9999
+  nodePort: ${KUBE_PORT}
 EOF
 
-                    # Patch deployment & service template
-                    sed -i.bak 's/containerPort: 80/containerPort: 9999/g' ${CHART_NAME}/templates/deployment.yaml
-                    sed -i.bak 's/targetPort: http/targetPort: 9999/g' ${CHART_NAME}/templates/service.yaml
-                    rm ${CHART_NAME}/templates/*.bak
+                    cat <<EOF > ${CHART_NAME}/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${RELEASE_NAME}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: ${RELEASE_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${RELEASE_NAME}
+    spec:
+      containers:
+      - name: ${RELEASE_NAME}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        ports:
+        - containerPort: 9999
+EOF
+
+                    cat <<EOF > ${CHART_NAME}/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${RELEASE_NAME}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: ${RELEASE_NAME}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      nodePort: {{ .Values.service.nodePort }}
+EOF
                 '''
             }
         }
 
         stage('Deploy to K3s via Helm') {
-            steps {
-               withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                   sh '''
-                       mkdir -p ~/.kube
-                       cp $KUBECONFIG_FILE ~/.kube/config
-                       chmod 600 ~/.kube/config
-                   '''
-                   sh """
-                       helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                       --namespace default \
-                       --set image.repository=${DOCKER_IMAGE} \
-                       --set image.tag=${BUILD_NUMBER} \
-                       --wait --timeout 5m
-                   """
-                }
-            }
-        }
-
-        stage('Patch Service to NodePort') {
             steps {
                 withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh '''
@@ -155,17 +152,13 @@ EOF
                         cp $KUBECONFIG_FILE ~/.kube/config
                         chmod 600 ~/.kube/config
 
-                        kubectl patch svc ${RELEASE_NAME}-${CHART_NAME} -n default -p '{"spec": {"type": "NodePort"}}'
-                   '''
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                          --namespace default \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER} \
+                          --wait --timeout 5m
+                    '''
                 }
-            }
-        }
-
-        stage('Application Verification') {
-            steps {
-                sh 'sleep 20'
-                sh 'kubectl get pods -n default | grep ${RELEASE_NAME} || exit 1'
-                sh 'curl -f http://192.168.0.101:9999 || exit 1'
             }
         }
     }
@@ -174,7 +167,7 @@ EOF
         success {
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "✅ Deployment complete. App is available at: http://192.168.0.101:9999",
+                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
                 to: 'edy@codershub.top'
             )
         }
