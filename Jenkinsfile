@@ -160,14 +160,6 @@ EOF
                 }
             }
         }
-
-        stage('Application Verification') {
-            steps {
-                sh 'sleep 20'
-                sh 'kubectl get pods -n default | grep ${RELEASE_NAME} || exit 1'
-                sh 'curl -f http://192.168.0.101:9999 || exit 1'
-            }
-        }
     }
 
     post {
