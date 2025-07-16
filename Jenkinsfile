@@ -147,6 +147,20 @@ EOF
             }
         }
 
+        stage('Patch Service to NodePort') {
+            steps {
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        mkdir -p ~/.kube
+                        cp $KUBECONFIG_FILE ~/.kube/config
+                        chmod 600 ~/.kube/config
+
+                        kubectl patch svc ${RELEASE_NAME}-${CHART_NAME} -n default -p '{"spec": {"type": "NodePort"}}'
+                   '''
+                }
+            }
+        }
+
         stage('Application Verification') {
             steps {
                 sh 'sleep 20'
