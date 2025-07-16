@@ -82,12 +82,12 @@ pipeline {
         }
 
         stage('Create Helm Chart Dynamically') {
-            steps {
-                sh '''
-                    rm -rf ${CHART_NAME}
-                    helm create ${CHART_NAME}
+    steps {
+        sh '''
+            rm -rf ${CHART_NAME}
+            helm create ${CHART_NAME}
 
-                    cat <<EOF > ${CHART_NAME}/values.yaml
+            cat <<EOF > ${CHART_NAME}/values.yaml
 replicaCount: 2
 
 image:
@@ -118,13 +118,13 @@ autoscaling:
   enabled: false
 EOF
 
-                    # Patch Helm chart YAML using sed instead of yq (yq fails on Go template syntax)
-                    sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
-                    sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
-                    sed -i '/targetPort: 9999/a \\    nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
-                '''
-            }
-        }
+            # Fix the YAML files using properly escaped and aligned sed
+            sed -i 's/containerPort: .*/containerPort: 9999/' ${CHART_NAME}/templates/deployment.yaml
+            sed -i 's/targetPort: .*/targetPort: 9999/' ${CHART_NAME}/templates/service.yaml
+            sed -i '/targetPort: 9999/a \          nodePort: {{ .Values.service.nodePort }}' ${CHART_NAME}/templates/service.yaml
+        '''
+    }
+}
 
         stage('Deploy to K3s via Helm') {
             steps {
