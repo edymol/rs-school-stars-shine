@@ -126,7 +126,11 @@ EOF
                     sed -i '/nodePort:/d' ${CHART_NAME}/templates/service.yaml
 
                     # Insert nodePort under targetPort with proper Helm template syntax, using the variable from values.yaml
-                    sed -i "/targetPort: 9999/a \\\\        nodePort: {{ .Values.service.nodePort }}" ${CHART_NAME}/templates/service.yaml
+                    awk '/targetPort: 9999/ {
+                                        print;
+                                        print "        nodePort: {{ .Values.service.nodePort }}";
+                                        next
+                                    }1' ${CHART_NAME}/templates/service.yaml > tmp.yaml && mv tmp.yaml ${CHART_NAME}/templates/service.yaml
 
                     rm ${CHART_NAME}/templates/*.bak
                 '''
