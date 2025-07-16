@@ -100,19 +100,18 @@ image:
 
 serviceAccount:
   create: false
-  annotations: {}
   name: ""
 
 service:
   type: ClusterIP
-  port: 9999
+  port: 80
 
 ingress:
   enabled: true
   className: ""
   annotations: {}
   hosts:
-    - host: ""
+    - host: rsschool.codershub.top
       paths:
         - path: /
           pathType: ImplementationSpecific
