@@ -185,12 +185,12 @@ EOF
     post {
         success {
             echo 'Pipeline succeeded! Sending notifications.'
-            // Email notification for success (multi-recipient, external template)
+            // Email notification for success (ONLY edy@codershub.top)
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com', // Added multiple recipients
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}', // Uses external template
-                mimeType: 'text/html' // Ensures HTML rendering in email client
+                to: 'edy@codershub.top', // Corrected: Only edy@codershub.top
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
+                mimeType: 'text/html'
             )
             // Slack notification for success (kept as is)
             slackSend (
@@ -202,11 +202,11 @@ EOF
 
         failure {
             echo 'Pipeline failed! Sending notifications.'
-            // Email notification for failure (multi-recipient, external template)
+            // Email notification for failure (ONLY edy@codershub.top)
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com', // Added multiple recipients
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}', // Uses external template
+                to: 'edy@codershub.top', // Corrected: Only edy@codershub.top
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
                 mimeType: 'text/html'
             )
             // Slack notification for failure (kept as is)
