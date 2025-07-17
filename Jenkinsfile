@@ -13,6 +13,10 @@ pipeline {
 
         SLACK_CHANNEL = '#github-trello-jenkins-updates'
         SLACK_INTEGRATION_ID = 'slack'
+
+        // --- UPDATED: Discord Webhook URL from Jenkins Credentials ---
+        // Replace 'discord-webhook-url' with the actual ID you gave your secret credential
+        DISCORD_WEBHOOK_URL = credentials('discord-webhook-url')
     }
 
     triggers {
@@ -187,7 +191,7 @@ EOF
             echo 'Pipeline succeeded! Sending notifications.'
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top',
+                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
                 mimeType: 'text/html'
             )
@@ -196,13 +200,29 @@ EOF
                 color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
+            discordSend (
+                webhookUrl: "${DISCORD_WEBHOOK_URL}", // This now points to the secret
+                content: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
+                embeds: [[
+                    color: 2621485,
+                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
+                    title: "Pipeline Status: SUCCESS",
+                    url: env.BUILD_URL,
+                    description: "Details for build #${env.BUILD_NUMBER} of ${env.JOB_NAME}",
+                    fields: [
+                        [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
+                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                    ],
+                    footer: [text: "Automated notification from Jenkins"]
+                ]]
+            )
         }
 
         failure {
             echo 'Pipeline failed! Sending notifications.'
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top',
+                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
                 mimeType: 'text/html'
             )
@@ -210,6 +230,22 @@ EOF
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
+            )
+            discordSend (
+                webhookUrl: "${DISCORD_WEBHOOK_URL}", // This now points to the secret
+                content: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
+                embeds: [[
+                    color: 14423109,
+                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
+                    title: "Pipeline Status: FAILED",
+                    url: env.BUILD_URL,
+                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed.",
+                    fields: [
+                        [name: "Failure Cause", value: "${CAUSE}", inline: false],
+                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                    ],
+                    footer: [text: "Automated notification from Jenkins"]
+                ]]
             )
         }
 
