@@ -14,6 +14,10 @@ pipeline {
         SLACK_INTEGRATION_ID = 'slack' // The ID of your Slack credential in Jenkins
     }
 
+    triggers {
+            githubPush()
+        }
+
     stages {
         stage('Checkout') {
             steps {
