@@ -29,7 +29,6 @@ pipeline {
         githubPush()
     }
 
-    // --- Stages: The sequential steps of your CI/CD pipeline ---
     stages {
         stage('1. Checkout Code') {
             steps {
@@ -49,8 +48,6 @@ pipeline {
         stage('3. Run Unit Tests') {
             steps {
                 echo 'Running unit tests with Vitest...'
-                // Executes Vitest tests. '|| echo "No tests configured"' prevents pipeline failure
-                // if vitest is not set up or returns non-zero for test issues (adjust as needed).
                 sh 'npx vitest run --coverage || echo "No tests configured"'
             }
         }
@@ -58,18 +55,16 @@ pipeline {
         stage('4. SonarQube Static Code Analysis') {
             steps {
                 echo 'Performing SonarQube analysis...'
-                // Integrates with a SonarQube server configured in Jenkins global tools
                 withSonarQubeEnv('SonarQube') { // 'SonarQube' is the name of your SonarQube server config in Jenkins
                     script {
                         def sonarParams = [
-                            "-Dsonar.projectKey=rs-school-stars-shine", // SonarQube project key
-                            "-Dsonar.sources=src",                      // Source code directory to analyze
-                            "-Dsonar.tests=src",                        // Test files directory to analyze
-                            "-Dsonar.exclusions=**/coverage/**,**/dist/**", // Files/dirs to exclude
-                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info" // Path to LCOV report for coverage
+                            "-Dsonar.projectKey=rs-school-stars-shine",
+                            "-Dsonar.sources=src",
+                            "-Dsonar.tests=src",
+                            "-Dsonar.exclusions=**/coverage/**,**/dist/**",
+                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
                         ]
 
-                        // Add Pull Request specific parameters if this is a PR build
                         if (env.CHANGE_ID) {
                             sonarParams += [
                                 "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
@@ -78,7 +73,6 @@ pipeline {
                             ]
                         }
 
-                        // Increase JVM memory for Sonar Scanner if needed
                         env.SONAR_SCANNER_OPTS = "-Xmx2g"
                         sh "npx sonar-scanner ${sonarParams.join(' ')}" // Executes the SonarQube scan
                     }
@@ -88,8 +82,8 @@ pipeline {
             post {
                 always {
                     echo 'Waiting for SonarQube Quality Gate result...'
-                    timeout(time: 5, unit: 'MINUTES') { // Max 5 minutes to wait for Quality Gate
-                        waitForQualityGate abortPipeline: true // Aborts pipeline if Quality Gate fails
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: true
                     }
                 }
             }
@@ -99,16 +93,11 @@ pipeline {
             steps {
                 echo 'Building and pushing Docker image...'
                 script {
-                    // Build Docker image with build number tag
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
-                    // Tag the image as 'latest'
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    // Login to DockerHub using credentials from Jenkins Credential Store
-                    // DOCKERHUB_CREDENTIALS_USR and DOCKERHUB_CREDENTIALS_PSW are exposed from the 'Docker_credentials' ID
                     withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
                         sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                     }
-                    // Push tagged images to DockerHub
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
@@ -118,8 +107,6 @@ pipeline {
         stage('6. Create Helm Chart') {
             steps {
                 echo 'Generating Helm chart files dynamically...'
-                // Dynamically creates the Helm chart directory and essential files (Chart.yaml, values.yaml, templates/deployment.yaml, templates/service.yaml)
-                // This approach ensures the chart is always in sync with the pipeline's variables.
                 sh '''
                     rm -rf ${CHART_NAME}
                     mkdir -p ${CHART_NAME}/templates
@@ -137,13 +124,13 @@ replicaCount: 1
 image:
   repository: ${DOCKER_IMAGE}
   pullPolicy: IfNotPresent
-  tag: "${BUILD_NUMBER}" # Use the current build number for image tag
+  tag: "${BUILD_NUMBER}"
 
 service:
   type: NodePort
   port: 80
   targetPort: 9999
-  nodePort: ${KUBE_PORT} # Use the dynamically set NodePort
+  nodePort: ${KUBE_PORT}
 EOF
 
                     cat <<EOF > ${CHART_NAME}/templates/deployment.yaml
@@ -189,31 +176,21 @@ EOF
         stage('7. Deploy to Kubernetes with Helm') {
             steps {
                 echo 'Deploying application to K3s cluster using Helm...'
-                // Uses Kubernetes config from Jenkins Credential Store (file type)
                 withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG_FILE')]) {
                     sh '''
-                        # Set KUBECONFIG environment variable to use the provided credential file
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
-                        chmod 600 ~/.kube/config # Ensure correct permissions for kubectl/helm
+                        chmod 600 ~/.kube/config
 
-                        # Upgrade or install the Helm release
                         helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \\
                           --namespace default \\
                           --set image.repository=${DOCKER_IMAGE} \\
                           --set image.tag=${BUILD_NUMBER} \\
-                          --wait --timeout 5m # Wait for release to be ready, max 5 minutes
+                          --wait --timeout 5m
                     '''
                 }
             }
         }
-        // Optional: Add a stage for Application Verification (e.g., curl endpoints, run smoke tests)
-        // stage('8. Application Verification') {
-        //     steps {
-        //         echo 'Verifying application deployment...'
-        //         sh 'curl -f http://<your-app-service-ip>:<your-app-nodeport>/health || exit 1' // Example smoke test
-        //     }
-        // }
     }
 
     // --- Post-build Actions: Notifications and cleanup based on pipeline status ---
@@ -223,22 +200,33 @@ EOF
             // Email notification for SUCCESS
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Multiple recipients
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}', // Uses external template
-                mimeType: 'text/html' // Ensures HTML rendering in email client
+                to: 'edy@codershub.top',
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
+                mimeType: 'text/html'
             )
             // Slack notification for SUCCESS
             slackSend (
                 channel: "${SLACK_CHANNEL}",
-                color: 'good', // Green color
+                color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
-            // Discord notification for SUCCESS
+            // Discord notification for SUCCESS (CORRECTED PARAMETERS)
             discordSend (
-                message: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
-                color: '#28A745', // Green hex color
-                username: 'Jenkins CI/CD',
-                avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
+                content: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
+                embeds: [[
+                    color: 2621485, // Green hex color as decimal (0x28A745)
+                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
+                    title: "Pipeline Status: SUCCESS",
+                    url: env.BUILD_URL,
+                    description: "Details for build #${env.BUILD_NUMBER} of ${env.JOB_NAME}",
+                    fields: [
+                        [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
+                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                    ],
+                    footer: [text: "Automated notification from Jenkins"]
+                ]]
+                // customUsername: 'Jenkins CI/CD', // This can be set globally in Jenkins config for the plugin
+                // avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png' // Can be set globally
             )
         }
 
@@ -247,32 +235,42 @@ EOF
             // Email notification for FAILURE
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Multiple recipients
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}', // Uses external template
+                to: 'edy@codershub.top',
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
                 mimeType: 'text/html'
             )
-            // Slack notification for FAILURE
+            // Slack notification for FAILURE (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
-                color: 'danger', // Red color
+                color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
             )
-            // Discord notification for FAILURE
+            // Discord notification for FAILURE (CORRECTED PARAMETERS)
             discordSend (
-                message: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
-                color: '#DC3545', // Red hex color
-                username: 'Jenkins CI/CD',
-                avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
+                content: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
+                embeds: [[
+                    color: 14423109, // Red hex color as decimal (0xDC3545)
+                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
+                    title: "Pipeline Status: FAILED",
+                    url: env.BUILD_URL,
+                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed.",
+                    fields: [
+                        [name: "Failure Cause", value: "${CAUSE}", inline: false],
+                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                    ],
+                    footer: [text: "Automated notification from Jenkins"]
+                ]]
+                // customUsername: 'Jenkins CI/CD',
+                // avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
             )
         }
 
         always {
             echo 'Performing post-build cleanup...'
-            // Clean up Docker login session and local images
-            sh 'docker logout || true' // Logout from DockerHub, '|| true' prevents pipeline failure if not logged in
-            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true" // Remove specific image tag
-            sh "docker rmi ${DOCKER_IMAGE}:latest || true" // Remove latest tag
-            sh 'rm -f ~/.kube/config' // Remove temporary Kubernetes config file
+            sh 'docker logout || true'
+            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
+            sh "docker rmi ${DOCKER_IMAGE}:latest || true"
+            sh 'rm -f ~/.kube/config'
         }
     }
 }
