@@ -14,8 +14,7 @@ pipeline {
         SLACK_CHANNEL = '#github-trello-jenkins-updates'
         SLACK_INTEGRATION_ID = 'slack'
 
-        // --- UPDATED: Discord Webhook URL from Jenkins Credentials ---
-        // Replace 'discord-webhook-url' with the actual ID you gave your secret credential
+        // --- Discord Webhook URL from Jenkins Credentials ---
         DISCORD_WEBHOOK_URL = credentials('discord-webhook-url')
     }
 
@@ -200,11 +199,12 @@ EOF
                 color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
+            // Discord notification for SUCCESS (CORRECTED PARAMETERS BASED ON PLUGIN ERROR MESSAGES)
             discordSend (
-                webhookUrl: "${DISCORD_WEBHOOK_URL}", // This now points to the secret
-                content: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
-                embeds: [[
-                    color: 2621485,
+                webhookURL: "${DISCORD_WEBHOOK_URL}", // Corrected: webhookURL (capital URL)
+                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>", // Corrected: footer (for main message text)
+                notes: [[ // Corrected: notes (for embeds list)
+                    color: 2621485, // Green hex color as decimal (0x28A745)
                     author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
                     title: "Pipeline Status: SUCCESS",
                     url: env.BUILD_URL,
@@ -213,7 +213,7 @@ EOF
                         [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
                         [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
                     ],
-                    footer: [text: "Automated notification from Jenkins"]
+                    // Discord embeds have their own footer. The 'footer' parameter of the step is for the main text.
                 ]]
             )
         }
@@ -231,11 +231,12 @@ EOF
                 color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
             )
+            // Discord notification for FAILURE (CORRECTED PARAMETERS BASED ON PLUGIN ERROR MESSAGES)
             discordSend (
-                webhookUrl: "${DISCORD_WEBHOOK_URL}", // This now points to the secret
-                content: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
-                embeds: [[
-                    color: 14423109,
+                webhookURL: "${DISCORD_WEBHOOK_URL}", // Corrected: webhookURL (capital URL)
+                footer: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>", // Corrected: footer (for main message text)
+                notes: [[ // Corrected: notes (for embeds list)
+                    color: 14423109, // Red hex color as decimal (0xDC3545)
                     author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
                     title: "Pipeline Status: FAILED",
                     url: env.BUILD_URL,
@@ -244,7 +245,7 @@ EOF
                         [name: "Failure Cause", value: "${CAUSE}", inline: false],
                         [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
                     ],
-                    footer: [text: "Automated notification from Jenkins"]
+                    // No 'footer' here as the main text is 'footer' for the step itself
                 ]]
             )
         }
