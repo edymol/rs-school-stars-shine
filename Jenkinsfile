@@ -168,13 +168,14 @@ EOF
 
     post {
         success {
-            // Email notification
+            // Email notification using an external template for success
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
-                to: 'edy@codershub.top'
+                to: 'edy@codershub.top', // Added multiple recipients
+                template: 'pipeline_success.html', // Reference your external success template file here
+                mimeType: 'text/html' // CRITICAL: Tell it this is HTML
             )
-            // Slack notification for success
+            // Slack notification for success (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'good', // Green color for success
@@ -183,13 +184,14 @@ EOF
         }
 
         failure {
-            // Email notification
+            // Email notification using an external template for failure
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
-                to: 'edy@codershub.top'
+                to: 'edy@codershub.top', // Added multiple recipients
+                template: 'pipeline_failure.html', // Reference your external failure template file here
+                mimeType: 'text/html' // CRITICAL: Tell it this is HTML
             )
-            // Slack notification for failure
+            // Slack notification for failure (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger', // Red color for failure
