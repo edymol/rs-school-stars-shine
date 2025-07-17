@@ -1,31 +1,21 @@
 pipeline {
-    agent { label 'worker-agents' } // Specifies that this pipeline will run on an agent with the 'worker-agents' label
+    agent { label 'worker-agents' }
 
     environment {
-        // --- Application and Environment Specific Variables ---
-        DOCKER_IMAGE = 'edydockers/rs-school-app' // Name for your Docker image
-        CHART_NAME = 'rs-school-chart'           // Name of your Helm chart
-        RELEASE_NAME = 'rs-school-app'           // Name for your Helm release in Kubernetes
-        KUBE_PORT = '31001'                      // NodePort for your application service in Kubernetes
+        DOCKER_IMAGE = 'edydockers/rs-school-app'
+        CHART_NAME = 'rs-school-chart'
+        RELEASE_NAME = 'rs-school-app'
+        KUBE_PORT = '31001'
 
-        // --- Jenkins Credentials IDs ---
-        KUBE_CONFIG = credentials('kubernetes-config')      // Credential ID for Kubernetes config file
-        SONAR_TOKEN = credentials('sonarqube-token')        // Credential ID for SonarQube authentication token
-        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials') // Credential ID for DockerHub login (Username/Password)
+        KUBE_CONFIG = credentials('kubernetes-config')
+        SONAR_TOKEN = credentials('sonarqube-token')
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
 
-        // --- Notification Specific Variables ---
-        SLACK_CHANNEL = '#github-trello-jenkins-updates' // Slack channel for notifications
-        SLACK_INTEGRATION_ID = 'slack'                   // Credential ID for Slack API Token (configured globally)
-
-        // Ensure your external email templates are located in $JENKINS_HOME/email-templates/
-        // e.g., /var/lib/jenkins/email-templates/pipeline_success.html
-        // e.g., /var/lib/jenkins/email-templates/pipeline_failure.html
+        SLACK_CHANNEL = '#github-trello-jenkins-updates'
+        SLACK_INTEGRATION_ID = 'slack'
     }
 
-    // --- Triggers: How the pipeline is initiated ---
     triggers {
-        // Triggers a build automatically when code is pushed to the GitHub repository.
-        // Requires a GitHub webhook configured in your repository pointing to Jenkins' /github-webhook/ endpoint.
         githubPush()
     }
 
@@ -33,15 +23,15 @@ pipeline {
         stage('1. Checkout Code') {
             steps {
                 echo 'Checking out source code...'
-                checkout scm // Checks out the code from the SCM defined in the job configuration
+                checkout scm
             }
         }
 
         stage('2. Install Dependencies & Build Application') {
             steps {
                 echo 'Installing Node.js dependencies and building the application...'
-                sh 'npm install' // Installs Node.js packages
-                sh 'npm run build' // Builds the application
+                sh 'npm install'
+                sh 'npm run build'
             }
         }
 
@@ -55,7 +45,7 @@ pipeline {
         stage('4. SonarQube Static Code Analysis') {
             steps {
                 echo 'Performing SonarQube analysis...'
-                withSonarQubeEnv('SonarQube') { // 'SonarQube' is the name of your SonarQube server config in Jenkins
+                withSonarQubeEnv('SonarQube') {
                     script {
                         def sonarParams = [
                             "-Dsonar.projectKey=rs-school-stars-shine",
@@ -74,11 +64,10 @@ pipeline {
                         }
 
                         env.SONAR_SCANNER_OPTS = "-Xmx2g"
-                        sh "npx sonar-scanner ${sonarParams.join(' ')}" // Executes the SonarQube scan
+                        sh "npx sonar-scanner ${sonarParams.join(' ')}"
                     }
                 }
             }
-            // Post-stage action for SonarQube: Wait for Quality Gate status
             post {
                 always {
                     echo 'Waiting for SonarQube Quality Gate result...'
@@ -193,75 +182,34 @@ EOF
         }
     }
 
-    // --- Post-build Actions: Notifications and cleanup based on pipeline status ---
     post {
         success {
             echo 'Pipeline succeeded! Sending notifications.'
-            // Email notification for SUCCESS
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                 to: 'edy@codershub.top',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
                 mimeType: 'text/html'
             )
-            // Slack notification for SUCCESS
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
-            // Discord notification for SUCCESS (CORRECTED PARAMETERS)
-            discordSend (
-                content: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
-                embeds: [[
-                    color: 2621485, // Green hex color as decimal (0x28A745)
-                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
-                    title: "Pipeline Status: SUCCESS",
-                    url: env.BUILD_URL,
-                    description: "Details for build #${env.BUILD_NUMBER} of ${env.JOB_NAME}",
-                    fields: [
-                        [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
-                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
-                    ],
-                    footer: [text: "Automated notification from Jenkins"]
-                ]]
-                // customUsername: 'Jenkins CI/CD', // This can be set globally in Jenkins config for the plugin
-                // avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png' // Can be set globally
-            )
         }
 
         failure {
             echo 'Pipeline failed! Sending notifications.'
-            // Email notification for FAILURE
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                 to: 'edy@codershub.top',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
                 mimeType: 'text/html'
             )
-            // Slack notification for FAILURE (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
-            )
-            // Discord notification for FAILURE (CORRECTED PARAMETERS)
-            discordSend (
-                content: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
-                embeds: [[
-                    color: 14423109, // Red hex color as decimal (0xDC3545)
-                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
-                    title: "Pipeline Status: FAILED",
-                    url: env.BUILD_URL,
-                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed.",
-                    fields: [
-                        [name: "Failure Cause", value: "${CAUSE}", inline: false],
-                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
-                    ],
-                    footer: [text: "Automated notification from Jenkins"]
-                ]]
-                // customUsername: 'Jenkins CI/CD',
-                // avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
             )
         }
 
