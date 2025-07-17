@@ -9,12 +9,10 @@ pipeline {
 
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
-        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        // DOCKERHUB_CREDENTIALS line removed from here
 
         SLACK_CHANNEL = '#github-trello-jenkins-updates'
         SLACK_INTEGRATION_ID = 'slack'
-
-        // --- Discord Webhook URL from Jenkins Credentials ---
         DISCORD_WEBHOOK_URL = credentials('discord-webhook-url')
     }
 
@@ -55,7 +53,8 @@ pipeline {
                             "-Dsonar.sources=src",
                             "-Dsonar.tests=src",
                             "-Dsonar.exclusions=**/coverage/**,**/dist/**",
-                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info",
+                            "-Dsonar.javascript.node.maxspace=4096"  // <-- FIX: Increased memory for Sonar
                         ]
 
                         if (env.CHANGE_ID) {
@@ -87,9 +86,12 @@ pipeline {
                 script {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
+
+                    // <-- FIX: Using credential ID directly instead of through environment variable
+                    withCredentials([usernamePassword(credentialsId: 'Docker_credentials', usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
                         sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                     }
+
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
@@ -190,7 +192,7 @@ EOF
             echo 'Pipeline succeeded! Sending notifications.'
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com',
+                to: 'edy@codershub.top, edymolinap@gmail.com',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
                 mimeType: 'text/html'
             )
@@ -199,12 +201,11 @@ EOF
                 color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
-            // Discord notification for SUCCESS (CORRECTED PARAMETERS BASED ON PLUGIN ERROR MESSAGES)
             discordSend (
-                webhookURL: "${DISCORD_WEBHOOK_URL}", // Corrected: webhookURL (capital URL)
-                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>", // Corrected: footer (for main message text)
-                notes: [[ // Corrected: notes (for embeds list)
-                    color: 2621485, // Green hex color as decimal (0x28A745)
+                webhookURL: "${DISCORD_WEBHOOK_URL}",
+                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
+                notes: [[
+                    color: 2621485, // Green
                     author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
                     title: "Pipeline Status: SUCCESS",
                     url: env.BUILD_URL,
@@ -212,8 +213,7 @@ EOF
                     fields: [
                         [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
                         [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
-                    ],
-                    // Discord embeds have their own footer. The 'footer' parameter of the step is for the main text.
+                    ]
                 ]]
             )
         }
@@ -222,7 +222,7 @@ EOF
             echo 'Pipeline failed! Sending notifications.'
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com',
+                to: 'edy@codershub.top, edymolinap@gmail.com',
                 body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
                 mimeType: 'text/html'
             )
@@ -231,21 +231,19 @@ EOF
                 color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
             )
-            // Discord notification for FAILURE (CORRECTED PARAMETERS BASED ON PLUGIN ERROR MESSAGES)
             discordSend (
-                webhookURL: "${DISCORD_WEBHOOK_URL}", // Corrected: webhookURL (capital URL)
-                footer: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>", // Corrected: footer (for main message text)
-                notes: [[ // Corrected: notes (for embeds list)
-                    color: 14423109, // Red hex color as decimal (0xDC3545)
+                webhookURL: "${DISCORD_WEBHOOK_URL}",
+                footer: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
+                notes: [[
+                    color: 14423109, // Red
                     author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
                     title: "Pipeline Status: FAILED",
                     url: env.BUILD_URL,
-                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed.",
+                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed. Please review logs for details.",
                     fields: [
-                        [name: "Failure Cause", value: "${CAUSE}", inline: false],
+                        // <-- FIX: Removed the field that used the non-existent ${CAUSE} variable
                         [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
-                    ],
-                    // No 'footer' here as the main text is 'footer' for the step itself
+                    ]
                 ]]
             )
         }
