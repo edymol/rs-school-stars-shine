@@ -1,55 +1,75 @@
 pipeline {
-    agent { label 'worker-agents' }
+    agent { label 'worker-agents' } // Specifies that this pipeline will run on an agent with the 'worker-agents' label
 
     environment {
-        DOCKER_IMAGE = 'edydockers/rs-school-app'
-        CHART_NAME = 'rs-school-chart'
-        RELEASE_NAME = 'rs-school-app'
-        KUBE_CONFIG = credentials('kubernetes-config')
-        SONAR_TOKEN = credentials('sonarqube-token')
-        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
-        KUBE_PORT = '31001'
-        // Define your Slack channel here, e.g., for general notifications
-        SLACK_CHANNEL = '#github-trello-jenkins-updates' // Use the channel you renamed!
-        SLACK_INTEGRATION_ID = 'slack' // The ID of your Slack credential in Jenkins
+        // --- Application and Environment Specific Variables ---
+        DOCKER_IMAGE = 'edydockers/rs-school-app' // Name for your Docker image
+        CHART_NAME = 'rs-school-chart'           // Name of your Helm chart
+        RELEASE_NAME = 'rs-school-app'           // Name for your Helm release in Kubernetes
+        KUBE_PORT = '31001'                      // NodePort for your application service in Kubernetes
+
+        // --- Jenkins Credentials IDs ---
+        KUBE_CONFIG = credentials('kubernetes-config')      // Credential ID for Kubernetes config file
+        SONAR_TOKEN = credentials('sonarqube-token')        // Credential ID for SonarQube authentication token
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials') // Credential ID for DockerHub login (Username/Password)
+
+        // --- Notification Specific Variables ---
+        SLACK_CHANNEL = '#github-trello-jenkins-updates' // Slack channel for notifications
+        SLACK_INTEGRATION_ID = 'slack'                   // Credential ID for Slack API Token (configured globally)
+
+        // Ensure your external email templates are located in $JENKINS_HOME/email-templates/
+        // e.g., /var/lib/jenkins/email-templates/pipeline_success.html
+        // e.g., /var/lib/jenkins/email-templates/pipeline_failure.html
     }
 
+    // --- Triggers: How the pipeline is initiated ---
     triggers {
-            githubPush()
-        }
+        // Triggers a build automatically when code is pushed to the GitHub repository.
+        // Requires a GitHub webhook configured in your repository pointing to Jenkins' /github-webhook/ endpoint.
+        githubPush()
+    }
 
+    // --- Stages: The sequential steps of your CI/CD pipeline ---
     stages {
-        stage('Checkout') {
+        stage('1. Checkout Code') {
             steps {
-                checkout scm
+                echo 'Checking out source code...'
+                checkout scm // Checks out the code from the SCM defined in the job configuration
             }
         }
 
-        stage('Install & Build') {
+        stage('2. Install Dependencies & Build Application') {
             steps {
-                sh 'npm install'
-                sh 'npm run build'
+                echo 'Installing Node.js dependencies and building the application...'
+                sh 'npm install' // Installs Node.js packages
+                sh 'npm run build' // Builds the application
             }
         }
 
-        stage('Unit Tests') {
+        stage('3. Run Unit Tests') {
             steps {
+                echo 'Running unit tests with Vitest...'
+                // Executes Vitest tests. '|| echo "No tests configured"' prevents pipeline failure
+                // if vitest is not set up or returns non-zero for test issues (adjust as needed).
                 sh 'npx vitest run --coverage || echo "No tests configured"'
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('4. SonarQube Static Code Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube') {
+                echo 'Performing SonarQube analysis...'
+                // Integrates with a SonarQube server configured in Jenkins global tools
+                withSonarQubeEnv('SonarQube') { // 'SonarQube' is the name of your SonarQube server config in Jenkins
                     script {
                         def sonarParams = [
-                            "-Dsonar.projectKey=rs-school-stars-shine",
-                            "-Dsonar.sources=src",
-                            "-Dsonar.tests=src",
-                            "-Dsonar.exclusions=**/coverage/**,**/dist/**",
-                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+                            "-Dsonar.projectKey=rs-school-stars-shine", // SonarQube project key
+                            "-Dsonar.sources=src",                      // Source code directory to analyze
+                            "-Dsonar.tests=src",                        // Test files directory to analyze
+                            "-Dsonar.exclusions=**/coverage/**,**/dist/**", // Files/dirs to exclude
+                            "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info" // Path to LCOV report for coverage
                         ]
 
+                        // Add Pull Request specific parameters if this is a PR build
                         if (env.CHANGE_ID) {
                             sonarParams += [
                                 "-Dsonar.pullrequest.key=${env.CHANGE_ID}",
@@ -58,34 +78,48 @@ pipeline {
                             ]
                         }
 
+                        // Increase JVM memory for Sonar Scanner if needed
                         env.SONAR_SCANNER_OPTS = "-Xmx2g"
-                        sh "npx sonar-scanner ${sonarParams.join(' ')}"
+                        sh "npx sonar-scanner ${sonarParams.join(' ')}" // Executes the SonarQube scan
                     }
                 }
             }
+            // Post-stage action for SonarQube: Wait for Quality Gate status
             post {
                 always {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true
+                    echo 'Waiting for SonarQube Quality Gate result...'
+                    timeout(time: 5, unit: 'MINUTES') { // Max 5 minutes to wait for Quality Gate
+                        waitForQualityGate abortPipeline: true // Aborts pipeline if Quality Gate fails
                     }
                 }
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('5. Docker Image Build & Push') {
             steps {
+                echo 'Building and pushing Docker image...'
                 script {
+                    // Build Docker image with build number tag
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                    // Tag the image as 'latest'
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    // Login to DockerHub using credentials from Jenkins Credential Store
+                    // DOCKERHUB_CREDENTIALS_USR and DOCKERHUB_CREDENTIALS_PSW are exposed from the 'Docker_credentials' ID
+                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
+                        sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    }
+                    // Push tagged images to DockerHub
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        stage('Create Clean Helm Chart') {
+        stage('6. Create Helm Chart') {
             steps {
+                echo 'Generating Helm chart files dynamically...'
+                // Dynamically creates the Helm chart directory and essential files (Chart.yaml, values.yaml, templates/deployment.yaml, templates/service.yaml)
+                // This approach ensures the chart is always in sync with the pipeline's variables.
                 sh '''
                     rm -rf ${CHART_NAME}
                     mkdir -p ${CHART_NAME}/templates
@@ -94,6 +128,7 @@ pipeline {
 apiVersion: v2
 name: ${CHART_NAME}
 version: 0.1.0
+description: A Helm chart for my application
 EOF
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
@@ -102,13 +137,13 @@ replicaCount: 1
 image:
   repository: ${DOCKER_IMAGE}
   pullPolicy: IfNotPresent
-  tag: "${BUILD_NUMBER}"
+  tag: "${BUILD_NUMBER}" # Use the current build number for image tag
 
 service:
   type: NodePort
   port: 80
   targetPort: 9999
-  nodePort: ${KUBE_PORT}
+  nodePort: ${KUBE_PORT} # Use the dynamically set NodePort
 EOF
 
                     cat <<EOF > ${CHART_NAME}/templates/deployment.yaml
@@ -151,74 +186,93 @@ EOF
             }
         }
 
-        stage('Deploy to K3s via Helm') {
+        stage('7. Deploy to Kubernetes with Helm') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
+                echo 'Deploying application to K3s cluster using Helm...'
+                // Uses Kubernetes config from Jenkins Credential Store (file type)
+                withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG_FILE')]) {
                     sh '''
+                        # Set KUBECONFIG environment variable to use the provided credential file
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
-                        chmod 600 ~/.kube/config
+                        chmod 600 ~/.kube/config # Ensure correct permissions for kubectl/helm
 
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
-                          --namespace default \
-                          --set image.repository=${DOCKER_IMAGE} \
-                          --set image.tag=${BUILD_NUMBER} \
-                          --wait --timeout 5m
+                        # Upgrade or install the Helm release
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \\
+                          --namespace default \\
+                          --set image.repository=${DOCKER_IMAGE} \\
+                          --set image.tag=${BUILD_NUMBER} \\
+                          --wait --timeout 5m # Wait for release to be ready, max 5 minutes
                     '''
                 }
             }
         }
+        // Optional: Add a stage for Application Verification (e.g., curl endpoints, run smoke tests)
+        // stage('8. Application Verification') {
+        //     steps {
+        //         echo 'Verifying application deployment...'
+        //         sh 'curl -f http://<your-app-service-ip>:<your-app-nodeport>/health || exit 1' // Example smoke test
+        //     }
+        // }
     }
 
+    // --- Post-build Actions: Notifications and cleanup based on pipeline status ---
     post {
         success {
-            // Email notification using an external template for success
+            echo 'Pipeline succeeded! Sending notifications.'
+            // Email notification for SUCCESS
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Added multiple recipients
-                template: 'pipeline_success.html', // Reference your external success template file here
-                mimeType: 'text/html' // CRITICAL: Tell it this is HTML
+                to: 'edy@codershub.top', // Multiple recipients
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}', // Uses external template
+                mimeType: 'text/html' // Ensures HTML rendering in email client
             )
-            // Slack notification for success (kept as is)
+            // Slack notification for SUCCESS
             slackSend (
                 channel: "${SLACK_CHANNEL}",
-                color: 'good', // Green color for success
+                color: 'good', // Green color
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
+            )
+            // Discord notification for SUCCESS
+            discordSend (
+                message: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
+                color: '#28A745', // Green hex color
+                username: 'Jenkins CI/CD',
+                avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
             )
         }
 
         failure {
-            // Email notification using an external template for failure
+            echo 'Pipeline failed! Sending notifications.'
+            // Email notification for FAILURE
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Added multiple recipients
-                template: 'pipeline_failure.html', // Reference your external failure template file here
-                mimeType: 'text/html' // CRITICAL: Tell it this is HTML
+                to: 'edy@codershub.top', // Multiple recipients
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}', // Uses external template
+                mimeType: 'text/html'
             )
-            // Slack notification for failure (kept as is)
+            // Slack notification for FAILURE
             slackSend (
                 channel: "${SLACK_CHANNEL}",
-                color: 'danger', // Red color for failure
+                color: 'danger', // Red color
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
+            )
+            // Discord notification for FAILURE
+            discordSend (
+                message: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
+                color: '#DC3545', // Red hex color
+                username: 'Jenkins CI/CD',
+                avatarUrl: 'https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png'
             )
         }
 
         always {
-            // Slack notification for always (can be used for 'fixed' or 'aborted' too)
-            // For a general 'always' message, you might want to be more generic or specific
-            // based on build status (e.g., if you only want success/failure, remove this 'always' block)
-            // Example: To notify about any final status
-            // slackSend (
-            //     channel: "${SLACK_CHANNEL}",
-            //     color: "${currentBuild.currentResult == 'SUCCESS' ? 'good' : (currentBuild.currentResult == 'FAILURE' ? 'danger' : 'warning')}",
-            //     message: "Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) finished with status: *${currentBuild.currentResult}*. <${env.BUILD_URL}|View Build>"
-            // )
-
-            // Clean up steps
-            sh 'docker logout || true'
-            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
-            sh "docker rmi ${DOCKER_IMAGE}:latest || true"
-            sh 'rm -f ~/.kube/config'
+            echo 'Performing post-build cleanup...'
+            // Clean up Docker login session and local images
+            sh 'docker logout || true' // Logout from DockerHub, '|| true' prevents pipeline failure if not logged in
+            sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true" // Remove specific image tag
+            sh "docker rmi ${DOCKER_IMAGE}:latest || true" // Remove latest tag
+            sh 'rm -f ~/.kube/config' // Remove temporary Kubernetes config file
         }
     }
 }
