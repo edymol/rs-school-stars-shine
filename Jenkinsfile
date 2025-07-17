@@ -9,7 +9,7 @@ pipeline {
 
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
-        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        DOCKERHUB_CREDENTIALS_ID = 'Docker_credentials' // Directly use the string ID here
 
         SLACK_CHANNEL = '#github-trello-jenkins-updates'
         SLACK_INTEGRATION_ID = 'slack'
@@ -84,7 +84,7 @@ pipeline {
                 script {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
+                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
                         sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                     }
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
@@ -185,12 +185,14 @@ EOF
     post {
         success {
             echo 'Pipeline succeeded! Sending notifications.'
+            // Email notification for success (multi-recipient, external template)
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top',
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
-                mimeType: 'text/html'
+                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com', // Added multiple recipients
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}', // Uses external template
+                mimeType: 'text/html' // Ensures HTML rendering in email client
             )
+            // Slack notification for success (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'good',
@@ -200,12 +202,14 @@ EOF
 
         failure {
             echo 'Pipeline failed! Sending notifications.'
+            // Email notification for failure (multi-recipient, external template)
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top',
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
+                to: 'edy@codershub.top, team.lead@example.com, devops.team@example.com', // Added multiple recipients
+                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}', // Uses external template
                 mimeType: 'text/html'
             )
+            // Slack notification for failure (kept as is)
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger',
