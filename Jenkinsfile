@@ -5,46 +5,34 @@ pipeline {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         CHART_NAME = 'rs-school-chart'
         RELEASE_NAME = 'rs-school-app'
-        KUBE_PORT = '31001'
-
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
-        DOCKERHUB_CREDENTIALS_ID = 'Docker_credentials' // Directly use the string ID here
-
-        SLACK_CHANNEL = '#github-trello-jenkins-updates'
-        SLACK_INTEGRATION_ID = 'slack'
-    }
-
-    triggers {
-        githubPush()
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        KUBE_PORT = '31001'
     }
 
     stages {
-        stage('1. Checkout Code') {
+        stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
                 checkout scm
             }
         }
 
-        stage('2. Install Dependencies & Build Application') {
+        stage('Install & Build') {
             steps {
-                echo 'Installing Node.js dependencies and building the application...'
                 sh 'npm install'
                 sh 'npm run build'
             }
         }
 
-        stage('3. Run Unit Tests') {
+        stage('Unit Tests') {
             steps {
-                echo 'Running unit tests with Vitest...'
                 sh 'npx vitest run --coverage || echo "No tests configured"'
             }
         }
 
-        stage('4. SonarQube Static Code Analysis') {
+        stage('SonarQube Analysis') {
             steps {
-                echo 'Performing SonarQube analysis...'
                 withSonarQubeEnv('SonarQube') {
                     script {
                         def sonarParams = [
@@ -70,7 +58,6 @@ pipeline {
             }
             post {
                 always {
-                    echo 'Waiting for SonarQube Quality Gate result...'
                     timeout(time: 5, unit: 'MINUTES') {
                         waitForQualityGate abortPipeline: true
                     }
@@ -78,24 +65,20 @@ pipeline {
             }
         }
 
-        stage('5. Docker Image Build & Push') {
+        stage('Docker Build & Push') {
             steps {
-                echo 'Building and pushing Docker image...'
                 script {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
-                        sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
-                    }
+                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        stage('6. Create Helm Chart') {
+        stage('Create Clean Helm Chart') {
             steps {
-                echo 'Generating Helm chart files dynamically...'
                 sh '''
                     rm -rf ${CHART_NAME}
                     mkdir -p ${CHART_NAME}/templates
@@ -104,7 +87,6 @@ pipeline {
 apiVersion: v2
 name: ${CHART_NAME}
 version: 0.1.0
-description: A Helm chart for my application
 EOF
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
@@ -162,19 +144,18 @@ EOF
             }
         }
 
-        stage('7. Deploy to Kubernetes with Helm') {
+        stage('Deploy to K3s via Helm') {
             steps {
-                echo 'Deploying application to K3s cluster using Helm...'
-                withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG_FILE')]) {
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh '''
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
                         chmod 600 ~/.kube/config
 
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \\
-                          --namespace default \\
-                          --set image.repository=${DOCKER_IMAGE} \\
-                          --set image.tag=${BUILD_NUMBER} \\
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                          --namespace default \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER} \
                           --wait --timeout 5m
                     '''
                 }
@@ -184,41 +165,32 @@ EOF
 
     post {
         success {
-            echo 'Pipeline succeeded! Sending notifications.'
-            // Email notification for success (ONLY edy@codershub.top)
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Corrected: Only edy@codershub.top
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
-                mimeType: 'text/html'
+                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
+                to: 'edy@codershub.top'
             )
-            // Slack notification for success (kept as is)
             slackSend (
-                channel: "${SLACK_CHANNEL}",
+                channel: '#your-slack-channel', // Replace with your Slack channel name
                 color: 'good',
-                message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
+                message: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' deployed successfully. App is available at: https://rsschool.codershub.top"
             )
         }
 
         failure {
-            echo 'Pipeline failed! Sending notifications.'
-            // Email notification for failure (ONLY edy@codershub.top)
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top', // Corrected: Only edy@codershub.top
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
-                mimeType: 'text/html'
+                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
+                to: 'edy@codershub.top'
             )
-            // Slack notification for failure (kept as is)
             slackSend (
-                channel: "${SLACK_CHANNEL}",
+                channel: '#your-slack-channel', // Replace with your Slack channel name
                 color: 'danger',
-                message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
+                message: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' failed. Check logs: ${env.BUILD_URL}"
             )
         }
 
         always {
-            echo 'Performing post-build cleanup...'
             sh 'docker logout || true'
             sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
             sh "docker rmi ${DOCKER_IMAGE}:latest || true"
