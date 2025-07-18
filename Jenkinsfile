@@ -5,47 +5,38 @@ pipeline {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         CHART_NAME = 'rs-school-chart'
         RELEASE_NAME = 'rs-school-app'
-        KUBE_PORT = '31001'
-
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
-        // DOCKERHUB_CREDENTIALS line removed from here
+        DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
+        KUBE_PORT = '31001'
 
+        // Notifier environment variables
         SLACK_CHANNEL = '#github-trello-jenkins-updates'
-        SLACK_INTEGRATION_ID = 'slack'
         DISCORD_WEBHOOK_URL = credentials('discord-webhook-url')
     }
 
-    triggers {
-        githubPush()
-    }
-
     stages {
-        stage('1. Checkout Code') {
+        stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
                 checkout scm
             }
         }
 
-        stage('2. Install Dependencies & Build Application') {
+        stage('Install & Build') {
             steps {
-                echo 'Installing Node.js dependencies and building the application...'
                 sh 'npm install'
                 sh 'npm run build'
             }
         }
 
-        stage('3. Run Unit Tests') {
+        stage('Unit Tests') {
             steps {
-                echo 'Running unit tests with Vitest...'
                 sh 'npx vitest run --coverage || echo "No tests configured"'
             }
         }
 
-        stage('4. SonarQube Static Code Analysis') {
+        stage('SonarQube Analysis') {
             steps {
-                echo 'Performing SonarQube analysis...'
                 withSonarQubeEnv('SonarQube') {
                     script {
                         def sonarParams = [
@@ -54,7 +45,7 @@ pipeline {
                             "-Dsonar.tests=src",
                             "-Dsonar.exclusions=**/coverage/**,**/dist/**",
                             "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info",
-                            "-Dsonar.javascript.node.maxspace=4096"  // <-- FIX: Increased memory for Sonar
+                            "-Dsonar.javascript.node.maxspace=4096"
                         ]
 
                         if (env.CHANGE_ID) {
@@ -72,7 +63,6 @@ pipeline {
             }
             post {
                 always {
-                    echo 'Waiting for SonarQube Quality Gate result...'
                     timeout(time: 5, unit: 'MINUTES') {
                         waitForQualityGate abortPipeline: true
                     }
@@ -80,27 +70,22 @@ pipeline {
             }
         }
 
-        stage('5. Docker Image Build & Push') {
+        stage('Docker Build & Push') {
             steps {
-                echo 'Building and pushing Docker image...'
                 script {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
-
-                    // <-- FIX: Using credential ID directly instead of through environment variable
                     withCredentials([usernamePassword(credentialsId: 'Docker_credentials', usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
                         sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                     }
-
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        stage('6. Create Helm Chart') {
+        stage('Create Clean Helm Chart') {
             steps {
-                echo 'Generating Helm chart files dynamically...'
                 sh '''
                     rm -rf ${CHART_NAME}
                     mkdir -p ${CHART_NAME}/templates
@@ -109,7 +94,6 @@ pipeline {
 apiVersion: v2
 name: ${CHART_NAME}
 version: 0.1.0
-description: A Helm chart for my application
 EOF
 
                     cat <<EOF > ${CHART_NAME}/values.yaml
@@ -167,19 +151,18 @@ EOF
             }
         }
 
-        stage('7. Deploy to Kubernetes with Helm') {
+        stage('Deploy to K3s via Helm') {
             steps {
-                echo 'Deploying application to K3s cluster using Helm...'
-                withCredentials([file(credentialsId: KUBE_CONFIG, variable: 'KUBECONFIG_FILE')]) {
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh '''
                         mkdir -p ~/.kube
                         cp $KUBECONFIG_FILE ~/.kube/config
                         chmod 600 ~/.kube/config
 
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \\
-                          --namespace default \\
-                          --set image.repository=${DOCKER_IMAGE} \\
-                          --set image.tag=${BUILD_NUMBER} \\
+                        helm upgrade --install ${RELEASE_NAME} ${CHART_NAME} \
+                          --namespace default \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER} \
                           --wait --timeout 5m
                     '''
                 }
@@ -189,12 +172,10 @@ EOF
 
     post {
         success {
-            echo 'Pipeline succeeded! Sending notifications.'
             emailext (
                 subject: "✅ SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, edymolinap@gmail.com',
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_success.html"}',
-                mimeType: 'text/html'
+                body: "✅ Deployment complete. App is available at: https://rsschool.codershub.top",
+                to: 'edy@codershub.top'
             )
             slackSend (
                 channel: "${SLACK_CHANNEL}",
@@ -203,7 +184,7 @@ EOF
             )
             discordSend (
                 webhookURL: "${DISCORD_WEBHOOK_URL}",
-                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}>",
+                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully!",
                 notes: [[
                     color: 2621485, // Green
                     author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
@@ -212,19 +193,17 @@ EOF
                     description: "Details for build #${env.BUILD_NUMBER} of ${env.JOB_NAME}",
                     fields: [
                         [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
-                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                        [name: "Build Duration", value: "${currentBuild.durationString}", inline: true]
                     ]
                 ]]
             )
         }
 
         failure {
-            echo 'Pipeline failed! Sending notifications.'
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                to: 'edy@codershub.top, edymolinap@gmail.com',
-                body: '${MAIL_TEMPLATE,showPaths=true,template="pipeline_failure.html"}',
-                mimeType: 'text/html'
+                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
+                to: 'edy@codershub.top'
             )
             slackSend (
                 channel: "${SLACK_CHANNEL}",
@@ -241,15 +220,13 @@ EOF
                     url: env.BUILD_URL,
                     description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed. Please review logs for details.",
                     fields: [
-                        // <-- FIX: Removed the field that used the non-existent ${CAUSE} variable
-                        [name: "Build Duration", value: "${BUILD_DURATION}", inline: true]
+                        [name: "Build Duration", value: "${currentBuild.durationString}", inline: true]
                     ]
                 ]]
             )
         }
 
         always {
-            echo 'Performing post-build cleanup...'
             sh 'docker logout || true'
             sh "docker rmi ${DOCKER_IMAGE}:${BUILD_NUMBER} || true"
             sh "docker rmi ${DOCKER_IMAGE}:latest || true"
