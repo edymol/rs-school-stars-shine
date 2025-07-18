@@ -182,20 +182,13 @@ EOF
                 color: 'good',
                 message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
             )
+            // <-- FIX: Corrected Discord step with simple parameters
             discordSend (
-                webhookURL: "${DISCORD_WEBHOOK_URL}",
-                footer: "✅ SUCCESS: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} completed successfully!",
-                notes: [[
-                    color: 2621485, // Green
-                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
-                    title: "Pipeline Status: SUCCESS",
-                    url: env.BUILD_URL,
-                    description: "Details for build #${env.BUILD_NUMBER} of ${env.JOB_NAME}",
-                    fields: [
-                        [name: "Deployment URL", value: "https://rsschool.codershub.top", inline: true],
-                        [name: "Build Duration", value: "${currentBuild.durationString}", inline: true]
-                    ]
-                ]]
+                webhookURL: DISCORD_WEBHOOK_URL,
+                title: "✅ Pipeline Success: ${env.JOB_NAME}",
+                description: "Build **#${env.BUILD_NUMBER}** completed successfully.\nDuration: **${currentBuild.durationString}**\n[View Build](${env.BUILD_URL})",
+                footer: "App deployed to: https://rsschool.codershub.top",
+                color: 2621485 // Green
             )
         }
 
@@ -210,19 +203,13 @@ EOF
                 color: 'danger',
                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
             )
+            // <-- FIX: Corrected Discord step with simple parameters
             discordSend (
-                webhookURL: "${DISCORD_WEBHOOK_URL}",
-                footer: "❌ FAILED: Pipeline `${env.JOB_NAME}` Build #${env.BUILD_NUMBER} failed! Check logs: <${env.BUILD_URL}>",
-                notes: [[
-                    color: 14423109, // Red
-                    author: [name: "Jenkins CI/CD", icon_url: "https://raw.githubusercontent.com/jenkinsci/jenkins/master/war/src/main/webapp/images/logo.png"],
-                    title: "Pipeline Status: FAILED",
-                    url: env.BUILD_URL,
-                    description: "Build #${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed. Please review logs for details.",
-                    fields: [
-                        [name: "Build Duration", value: "${currentBuild.durationString}", inline: true]
-                    ]
-                ]]
+                webhookURL: DISCORD_WEBHOOK_URL,
+                title: "❌ Pipeline Failed: ${env.JOB_NAME}",
+                description: "Build **#${env.BUILD_NUMBER}** failed.\nDuration: **${currentBuild.durationString}**\n[View Build](${env.BUILD_URL})",
+                footer: "Please check the Jenkins logs for details.",
+                color: 14423109 // Red
             )
         }
 
