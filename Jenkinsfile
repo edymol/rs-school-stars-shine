@@ -2,10 +2,9 @@ pipeline {
     agent { label 'worker-agents' }
 
     triggers {
-        // Trigger on every git push (requires webhook)
+        // GitHub webhook trigger
         githubPush()
-
-        // Optional: Also poll the SCM every 5 minutes (if webhook isn't reliable)
+        // Or use polling if needed
         // pollSCM('H/5 * * * *')
     }
 
@@ -29,7 +28,7 @@ pipeline {
 
         stage('Install & Build') {
             steps {
-                sh 'npm install'
+                sh 'npm ci'
                 sh 'npm run build'
             }
         }
@@ -50,7 +49,7 @@ pipeline {
                             "-Dsonar.tests=src",
                             "-Dsonar.exclusions=**/coverage/**,**/dist/**",
                             "-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info",
-                            "-Dsonar.javascript.node.maxspace=4096"
+                            "-Dsonar.javascript.node.maxspace=1024" // 🔧 Lowered to prevent OOM
                         ]
 
                         if (env.CHANGE_ID) {
@@ -61,7 +60,7 @@ pipeline {
                             ]
                         }
 
-                        env.SONAR_SCANNER_OPTS = "-Xmx2g"
+                        env.SONAR_SCANNER_OPTS = "-Xmx1g"
                         sh "npx sonar-scanner ${sonarParams.join(' ')}"
                     }
                 }
@@ -187,20 +186,20 @@ EOF
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'good',
-                message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) completed successfully! App deployed to: https://rsschool.codershub.top <${env.BUILD_URL}|View Build>"
+                message: "✅ SUCCESS: Pipeline '${env.JOB_NAME}' (#${env.BUILD_NUMBER}) deployed successfully! 🎉\nApp: https://rsschool.codershub.top\n<${env.BUILD_URL}|View Build Logs>"
             )
         }
 
         failure {
             emailext (
                 subject: "❌ FAILURE: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                body: "Pipeline failed. Check logs: ${env.BUILD_URL}",
+                body: "❌ Pipeline failed. Check logs: ${env.BUILD_URL}",
                 to: 'edy@codershub.top'
             )
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: 'danger',
-                message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (${env.BUILD_NUMBER}) failed! Please check the build logs: <${env.BUILD_URL}|View Build>"
+                message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (#${env.BUILD_NUMBER}) failed.\n<${env.BUILD_URL}|View Logs>"
             )
         }
 
