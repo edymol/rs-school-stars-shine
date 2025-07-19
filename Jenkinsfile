@@ -16,7 +16,7 @@ pipeline {
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
         KUBE_PORT = '31001'
-        SLACK_CHANNEL = '#github-trello-jenkins-updates'
+        SLACK_CHANNEL = '#notifications'
     }
 
     stages {
