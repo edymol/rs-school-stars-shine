@@ -46,6 +46,7 @@ pipeline {
                         mkdir -p ~/.kube
                         cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
+                        helm delete prometheus -n monitoring || true
                         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
                         helm repo update
                         if helm status prometheus -n ${NAMESPACE} > /dev/null 2>&1; then
