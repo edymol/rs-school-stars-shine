@@ -7,18 +7,17 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
-        CHART_NAME = 'rs-school-chart'
-        CHART_DIR = "helm/${CHART_NAME}"
         RELEASE_NAME = 'rs-school-app'
+        CHART_DIR = 'rs-school-app'
         KUBE_CONFIG = credentials('kubernetes-config')
         SONAR_TOKEN = credentials('sonarqube-token')
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
         KUBE_PORT = '31001'
         SLACK_CHANNEL = '#notifications'
-        PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
-        PROMETHEUS_CLUSTER_NAMESPACE = "monitoring"
-        CONFIG_DIR = "./helm/kube-monitoring-stack"
+        NAMESPACE = 'rs-school'
+        CONFIG_DIR = "."
         GRAFANA_CONFIGS_DIR = "./helm/grafana-configs"
+        PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
     }
 
     stages {
@@ -82,7 +81,9 @@ pipeline {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
                     withCredentials([usernamePassword(credentialsId: 'Docker_credentials', usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
-                        sh "echo \"${DOCKERHUB_CREDENTIALS_PSW}\" | docker login -u \"${DOCKERHUB_CREDENTIALS_USR}\" --password-stdin"
+                        sh """
+                            echo "${DOCKERHUB_CREDENTIALS_PSW}" | docker login -u "${DOCKERHUB_CREDENTIALS_USR}" --password-stdin
+                        """
                     }
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
@@ -92,54 +93,55 @@ pipeline {
 
         stage('Deploy Grafana Configs') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                    sh """
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG')]) {
+                    sh '''
                         mkdir -p ~/.kube
-                        cp ${KUBECONFIG_FILE} ~/.kube/config
+                        cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
                         helm install grafana-configs ${GRAFANA_CONFIGS_DIR} \
-                            -n ${PROMETHEUS_CLUSTER_NAMESPACE} \
+                            -n ${NAMESPACE} \
                             --create-namespace \
                             --wait
-                    """
+                    '''
                 }
             }
         }
 
         stage('Deploy monitoring Stack') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                    sh """
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG')]) {
+                    sh '''
                         mkdir -p ~/.kube
-                        cp ${KUBECONFIG_FILE} ~/.kube/config
+                        cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
                         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
                         helm repo update
                         helm install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
-                            -n ${PROMETHEUS_CLUSTER_NAMESPACE} \
+                            -n ${NAMESPACE} \
                             -f ${CONFIG_DIR}/values.yaml \
                             --create-namespace \
                             --atomic \
                             --wait
-                    """
+                    '''
                 }
             }
         }
 
         stage('Deploy to K3s via Helm') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
-                    sh """
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG')]) {
+                    sh '''
                         mkdir -p ~/.kube
-                        cp ${KUBECONFIG_FILE} ~/.kube/config
+                        cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
 
+                        kubectl create namespace ${NAMESPACE} || true
                         helm install ${RELEASE_NAME} ${CHART_DIR} \
-                            --namespace default \
-                            --set image.repository=${DOCKER_IMAGE} \
-                            --set image.tag=${BUILD_NUMBER} \
-                            --wait --timeout 5m
-                    """
+                          --namespace ${NAMESPACE} \
+                          --set image.repository=${DOCKER_IMAGE} \
+                          --set image.tag=${BUILD_NUMBER} \
+                          --wait --timeout 5m
+                    '''
                 }
             }
         }
@@ -165,11 +167,11 @@ pipeline {
                 body: "❌ Pipeline failed. Check logs: ${env.BUILD_URL}",
                 to: 'edy@codershub.top'
             )
-            slackSend (
-                channel: "${SLACK_CHANNEL}",
-                color: 'danger',
-                message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (#${env.BUILD_NUMBER}) failed.\n<${env.BUILD_URL}|View Logs>"
-            )
+//             slackSend (
+//                 channel: "${SLACK_CHANNEL}",
+//                 color: 'danger',
+//                 message: "❌ FAILED: Pipeline '${env.JOB_NAME}' (#${env.BUILD_NUMBER}) failed.\n<${env.BUILD_URL}|View Logs>"
+//             )
         }
 
         always {
