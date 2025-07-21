@@ -15,7 +15,7 @@ pipeline {
         KUBE_PORT = '31001'
         SLACK_CHANNEL = '#notifications'
         NAMESPACE = 'rs-school'
-        CONFIG_DIR = "."
+        CONFIG_DIR = "./kube-monitoring-stack"
         GRAFANA_CONFIGS_DIR = "./helm/grafana-configs"
         PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
     }
