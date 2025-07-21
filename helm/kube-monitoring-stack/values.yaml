@@ -4,16 +4,17 @@ grafana:
   defaultDashboardsEnabled: false
   service:
     type: NodePort
+    nodePort: 30351
   sidecar:
     alerts:
       label: grafana_alert
       enabled: true
-      searchNamespace: monitoring
+      searchNamespace: rs-school
       labelValue: "1"
     dashboards:
       enabled: true
       label: grafana_dashboard
-      searchNamespace: monitoring
+      searchNamespace: rs-school
       labelValue: "1"
   env:
     GF_SMTP_ENABLED: "true"
@@ -33,3 +34,4 @@ alertmanager:
 prometheus:
   service:
     type: NodePort
+    nodePort: 30090

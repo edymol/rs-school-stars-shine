@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-contact-points
-  namespace: monitoring
+  namespace: rs-school
   labels:
     grafana_alert: "1"
 data:

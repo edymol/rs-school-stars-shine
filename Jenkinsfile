@@ -14,6 +14,7 @@ pipeline {
         CONFIG_DIR = "./helm/kube-monitoring-stack"
         GRAFANA_CONFIGS_DIR = "./helm/grafana-configs"
         PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
+        PROMETHEUS_CLUSTER_NAMESPACE = "rs-school"
     }
 
     stages {
