@@ -24,10 +24,16 @@ pipeline {
                         mkdir -p ~/.kube
                         cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
-                        helm install grafana-configs ${GRAFANA_CONFIGS_DIR} \
-                            -n ${NAMESPACE} \
-                            --create-namespace \
-                            --wait
+                        kubectl create namespace ${NAMESPACE} || true
+                        if helm status grafana-configs -n ${NAMESPACE} > /dev/null 2>&1; then
+                          helm upgrade grafana-configs ${GRAFANA_CONFIGS_DIR} \
+                              -n ${NAMESPACE} \
+                              --wait
+                        else
+                          helm install grafana-configs ${GRAFANA_CONFIGS_DIR} \
+                              -n ${NAMESPACE} \
+                              --wait
+                        fi
                     '''
                 }
             }
@@ -42,12 +48,19 @@ pipeline {
                         chmod 600 ~/.kube/config
                         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
                         helm repo update
-                        helm install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
-                            -n ${NAMESPACE} \
-                            -f ${CONFIG_DIR}/values.yaml \
-                            --create-namespace \
-                            --atomic \
-                            --wait
+                        if helm status prometheus -n ${NAMESPACE} > /dev/null 2>&1; then
+                          helm upgrade prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
+                              -n ${NAMESPACE} \
+                              -f ${CONFIG_DIR}/values.yaml \
+                              --atomic \
+                              --wait
+                        else
+                          helm install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
+                              -n ${NAMESPACE} \
+                              -f ${CONFIG_DIR}/values.yaml \
+                              --atomic \
+                              --wait
+                        fi
                     '''
                 }
             }
@@ -60,13 +73,19 @@ pipeline {
                         mkdir -p ~/.kube
                         cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
-
-                        kubectl create namespace ${NAMESPACE} || true
-                        helm install ${RELEASE_NAME} ${CHART_DIR} \
-                          --namespace ${NAMESPACE} \
-                          --set image.repository=${DOCKER_IMAGE} \
-                          --set image.tag=${BUILD_NUMBER} \
-                          --wait --timeout 5m
+                        if helm status ${RELEASE_NAME} -n ${NAMESPACE} > /dev/null 2>&1; then
+                          helm upgrade ${RELEASE_NAME} ${CHART_DIR} \
+                              --namespace ${NAMESPACE} \
+                              --set image.repository=${DOCKER_IMAGE} \
+                              --set image.tag=${BUILD_NUMBER} \
+                              --wait --timeout 5m
+                        else
+                          helm install ${RELEASE_NAME} ${CHART_DIR} \
+                              --namespace ${NAMESPACE} \
+                              --set image.repository=${DOCKER_IMAGE} \
+                              --set image.tag=${BUILD_NUMBER} \
+                              --wait --timeout 5m
+                        fi
                     '''
                 }
             }
