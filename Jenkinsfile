@@ -15,9 +15,10 @@ pipeline {
         DOCKERHUB_CREDENTIALS = credentials('Docker_credentials')
         KUBE_PORT = '31001'
         SLACK_CHANNEL = '#notifications'
-        PROMETHEUS_CHART_NAME = "kube-monitoring-stack"
+        PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
         PROMETHEUS_CLUSTER_NAMESPACE = "monitoring"
         CONFIG_DIR = "./helm/kube-monitoring-stack"
+        GRAFANA_CONFIGS_DIR = "./helm/grafana-configs"
     }
 
     stages {
@@ -81,7 +82,6 @@ pipeline {
                     sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
                     sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
                     withCredentials([usernamePassword(credentialsId: 'Docker_credentials', usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
-                        // Corrected Docker login syntax for Groovy string interpolation
                         sh "echo \"${DOCKERHUB_CREDENTIALS_PSW}\" | docker login -u \"${DOCKERHUB_CREDENTIALS_USR}\" --password-stdin"
                     }
                     sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
@@ -90,18 +90,17 @@ pipeline {
             }
         }
 
-        stage('Apply Grafana Configurations') {
+        stage('Deploy Grafana Configs') {
             steps {
                 withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh """
                         mkdir -p ~/.kube
                         cp ${KUBECONFIG_FILE} ~/.kube/config
                         chmod 600 ~/.kube/config
-                        kubectl create namespace ${PROMETHEUS_CLUSTER_NAMESPACE} || true
-                        kubectl apply -f ${CONFIG_DIR}/grafana-contact-points.yaml \
-                                    -f ${CONFIG_DIR}/grafana-alert-rules.yaml \
-                                    -f ${CONFIG_DIR}/grafana-dashboards.yaml \
-                                    -n ${PROMETHEUS_CLUSTER_NAMESPACE}
+                        helm install grafana-configs ${GRAFANA_CONFIGS_DIR} \
+                            -n ${PROMETHEUS_CLUSTER_NAMESPACE} \
+                            --create-namespace \
+                            --wait
                     """
                 }
             }
@@ -116,7 +115,7 @@ pipeline {
                         chmod 600 ~/.kube/config
                         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
                         helm repo update
-                        helm upgrade --install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
+                        helm install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
                             -n ${PROMETHEUS_CLUSTER_NAMESPACE} \
                             -f ${CONFIG_DIR}/values.yaml \
                             --create-namespace \
@@ -135,7 +134,7 @@ pipeline {
                         cp ${KUBECONFIG_FILE} ~/.kube/config
                         chmod 600 ~/.kube/config
 
-                        helm upgrade --install ${RELEASE_NAME} ${CHART_DIR} \
+                        helm install ${RELEASE_NAME} ${CHART_DIR} \
                             --namespace default \
                             --set image.repository=${DOCKER_IMAGE} \
                             --set image.tag=${BUILD_NUMBER} \
