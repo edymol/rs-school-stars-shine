@@ -74,6 +74,7 @@ pipeline {
                         mkdir -p ~/.kube
                         cp $KUBECONFIG ~/.kube/config
                         chmod 600 ~/.kube/config
+                        helm delete ${RELEASE_NAME} -n default || true
                         if helm status ${RELEASE_NAME} -n ${NAMESPACE} > /dev/null 2>&1; then
                           helm upgrade ${RELEASE_NAME} ${CHART_DIR} \
                               --namespace ${NAMESPACE} \
