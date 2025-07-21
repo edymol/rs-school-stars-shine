@@ -11,7 +11,7 @@ pipeline {
         CHART_DIR = 'rs-school-app'
         KUBE_CONFIG = credentials('kubernetes-config')
         NAMESPACE = 'rs-school'
-        CONFIG_DIR = "./kube-monitoring-stack"
+        CONFIG_DIR = "./helm/kube-monitoring-stack"
         GRAFANA_CONFIGS_DIR = "./helm/grafana-configs"
         PROMETHEUS_CHART_NAME = "kube-prometheus-stack"
     }
