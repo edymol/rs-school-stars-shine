@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: rs-school-app
+    namespace: default
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: rs-school-app
+    template:
+        metadata:
+            labels:
+                app: rs-school-app
+        spec:
+            containers:
+                - name: rs-school-app
+                  image: edydockers/rs-school-app:4
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                      - containerPort: 9999
+                        protocol: TCP
+                  resources: {}

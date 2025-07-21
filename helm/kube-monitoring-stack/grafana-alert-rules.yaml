@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alert-rules
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  cluster-alerts.yaml: |-
+      apiVersion: 1
+      groups:
+        - orgId: 1
+          name: cluster-monitoring-alerts
+          folder: Cluster Monitoring
+          interval: 1m
+          rules:
+            - uid: high-cpu-utilization
+              title: High CPU Utilization
+              condition: C
+              data:
+                - refId: A
+                  queryType: range
+                  relativeTimeRange:
+                    from: 600
+                    to: 0
+                  datasourceUid: prometheus
+                  model:
+                    exemplar: false
+                    expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    refId: A
+                - refId: B
+                  datasourceUid: __expr__
+                  model:
+                    expression: A
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    reducer: last
+                    refId: B
+                    type: reduce
+                - refId: C
+                  datasourceUid: __expr__
+                  model:
+                    expr: $B > 80
+                    expression: $B > 80
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    refId: C
+                    type: math
+              noDataState: NoData
+              execErrState: Alerting
+              for: 5m
+              annotations:
+                description: 'CPU usage is {{ $values.B }}% (threshold: 80%)'
+                summary: High CPU usage on {{ $labels.instance }}
+              labels:
+                severity: warning
+              isPaused: false
+              notification_settings:
+                receiver: email admin
+            
+            - uid: low-available-memory
+              title: Low Available Memory
+              condition: C
+              data:
+                - refId: A
+                  queryType: range
+                  relativeTimeRange:
+                    from: 600
+                    to: 0
+                  datasourceUid: prometheus
+                  model:
+                    exemplar: false
+                    expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    refId: A
+                - refId: B
+                  datasourceUid: __expr__
+                  model:
+                    expression: A
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    reducer: last
+                    refId: B
+                    type: reduce
+                - refId: C
+                  datasourceUid: __expr__
+                  model:
+                    expr: $B < 10
+                    expression: $B < 10
+                    intervalMs: 1000
+                    maxDataPoints: 43200
+                    refId: C
+                    type: math
+              noDataState: NoData
+              execErrState: Alerting
+              for: 5m
+              annotations:
+                description: Available memory is only {{ $values.B }}%
+                summary: Low available memory on {{ $labels.instance }}
+              labels:
+                severity: warning
+              isPaused: false
+              notification_settings:
+                receiver: email admin
