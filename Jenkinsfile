@@ -18,18 +18,16 @@ pipeline {
     }
 
     stages {
-        stage('Initialize Kubeconfig') { // New stage for common kubeconfig setup
+        stage('Initialize Kubeconfig') {
             steps {
-                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) { // Changed variable name for clarity
+                withCredentials([file(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG_FILE')]) {
                     sh """
                         mkdir -p ~/.kube
-                        cp ${KUBECONFIG_FILE} ~/.kube/config
+                        # Securely copy kubeconfig
+                        cp "${KUBECONFIG_FILE}" ~/.kube/config
                         chmod 600 ~/.kube/config
-                        # Ensure kubectl is available on the agent
-                        # This might vary based on your worker-agent's OS. Example for Debian/Ubuntu:
-                        # apt-get update && apt-get install -y kubectl helm || true
-                        # For now, rely on previous successful runs showing helm is available.
-                        # It's good practice to ensure kubectl is in PATH, but it's not blocking now.
+                        # You can add kubectl/helm installation checks here if worker-agent truly lacks them
+                        # e.g., if ! command -v kubectl &> /dev/null; then sudo apt-get update && sudo apt-get install -y kubectl; fi
                     """
                 }
             }
@@ -38,10 +36,7 @@ pipeline {
         stage('Deploy Grafana Configs') {
             steps {
                 sh '''
-                    # Create namespace if it doesn't exist
-                    kubectl create namespace ${NAMESPACE} || true
-
-                    # Use helm upgrade --install for robustness
+                    kubectl create namespace ${NAMESPACE} || true # Ensure namespace exists
                     helm upgrade --install grafana-configs ${GRAFANA_CONFIGS_DIR} \
                         -n ${NAMESPACE} \
                         --wait
@@ -52,15 +47,13 @@ pipeline {
         stage('Deploy Monitoring Stack') {
             steps {
                 sh '''
-                    # Optional: Clean up old release from wrong namespace if it somehow exists
-                    helm delete prometheus -n monitoring || true
-                    # Optional: Delete from correct namespace for a guaranteed clean re-install, though --install should handle it
-                    # helm delete prometheus -n ${NAMESPACE} || true
+                    # Aggressive cleanup of old/stuck releases (from any possible namespace)
+                    helm uninstall prometheus -n monitoring || true
+                    helm uninstall prometheus -n ${NAMESPACE} || true
 
-                    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true # Add || true to prevent failure if repo already exists
+                    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
                     helm repo update
 
-                    # Use helm upgrade --install for robustness
                     helm upgrade --install prometheus prometheus-community/${PROMETHEUS_CHART_NAME} \
                         -n ${NAMESPACE} \
                         -f ${CONFIG_DIR}/values.yaml \
@@ -70,15 +63,12 @@ pipeline {
             }
         }
 
-        stage('Deploy RS School App') { // Renamed for clarity
+        stage('Deploy RS School App') {
             steps {
                 sh '''
-                    # Optional: Clean up old release from wrong namespace (default) if it exists
-                    helm delete ${RELEASE_NAME} -n default || true
-                    # Optional: Delete from correct namespace for a guaranteed clean re-install
-                    # helm delete ${RELEASE_NAME} -n ${NAMESPACE} || true
+                    helm uninstall ${RELEASE_NAME} -n default || true
+                    helm uninstall ${RELEASE_NAME} -n ${NAMESPACE} || true # Ensure clean slate in target namespace
 
-                    # Use helm upgrade --install for robustness
                     helm upgrade --install ${RELEASE_NAME} ${CHART_DIR} \
                         --namespace ${NAMESPACE} \
                         --set image.repository=${DOCKER_IMAGE} \
