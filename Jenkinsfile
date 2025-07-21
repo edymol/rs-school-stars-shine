@@ -8,7 +8,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'edydockers/rs-school-app'
         RELEASE_NAME = 'rs-school-app'
-        CHART_DIR = 'rs-school-app'
+        CHART_DIR = './rs-school-app'
         KUBE_CONFIG = credentials('kubernetes-config')
         NAMESPACE = 'rs-school'
         CONFIG_DIR = "./helm/kube-monitoring-stack"
