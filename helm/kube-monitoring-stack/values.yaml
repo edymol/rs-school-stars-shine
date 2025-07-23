@@ -1,0 +1,37 @@
+grafana:
+  adminUser: "admin"
+  adminPassword: "admin"
+  defaultDashboardsEnabled: false
+  service:
+    type: NodePort
+    nodePort: 30351
+  sidecar:
+    alerts:
+      label: grafana_alert
+      enabled: true
+      searchNamespace: rs-school
+      labelValue: "1"
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: rs-school
+      labelValue: "1"
+  env:
+    GF_SMTP_ENABLED: "true"
+    GF_SMTP_HOST: "smtp.gmail.com:587"
+    GF_SMTP_USER: "edy@codershub.top"
+    GF_SMTP_PASSWORD: "password"
+    GF_SMTP_FROM_ADDRESS: "edy@codershub.top"
+    GF_SMTP_FROM_NAME: "Grafana Alerts"
+    GF_SMTP_SKIP_VERIFY: "false"
+
+alertmanager:
+  defaultRules:
+    create: false
+  service:
+    type: NodePort
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30090
